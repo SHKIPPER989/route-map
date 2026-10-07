@@ -6,7 +6,7 @@
    point-modal.js; this file owns point *deletion* (shared with the map
    popups in map.js) and the points table shown when a route is expanded.
    ============================================================================= */
-const App = window.App || (window.App = {});
+//const App = window.App || (window.App = {});
 
 App.sidebar = {};
 
