@@ -5,7 +5,7 @@
    keeping it that way means the data model stays trivial to export/import
    and easy to reason about as new features get added.
    ============================================================================= */
-const App = window.App || (window.App = {});
+//const App = window.App || (window.App = {});
 
 // ---- data model -------------------------------------------------------------
 // route: {id, name, type:'pedestrian'|'vehicle', color, tags:[...], visible,
