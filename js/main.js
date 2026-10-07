@@ -5,7 +5,6 @@
    a plain file:// page, hence the protocol check), then does the first
    render. Load this file last — it assumes every other module is in place.
    ============================================================================= */
-const App = window.App || (window.App = {});
 
 (function(){
   const { state, utils } = App;
