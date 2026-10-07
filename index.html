@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта маршрутів</title>
+
+<!-- Leaflet (base map) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<!-- Leaflet.markercluster (groups nearby points together when zoomed out) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ============================= SIDEBAR ============================= -->
+  <aside id="sidebar">
+
+    <!-- Collapsed state: a 52px icon rail with just the "expand" button -->
+    <div id="sidebarRail">
+      <button id="railExpandBtn" title="Розгорнути панель">☰</button>
+    </div>
+
+    <div id="sidebarContent">
+      <div id="sidebarHeader">
+        <h1>🗺️ Карта маршрутів</h1>
+        <button class="icon-btn" id="collapseBtn" title="Згорнути панель">⮘</button>
+      </div>
+
+      <!-- ---- Create a new route ---- -->
+      <div class="section pad">
+        <h2>Новий маршрут</h2>
+        <label>Назва</label>
+        <input type="text" id="routeName" placeholder="напр. Об'єкт №1, 22.09">
+        <div class="row">
+          <div>
+            <label>Тип</label>
+            <select id="routeType">
+              <option value="pedestrian">🚶 Пішохід</option>
+              <option value="vehicle">🚗 Авто</option>
+            </select>
+          </div>
+          <div>
+            <label>Колір</label>
+            <input type="color" id="routeColor" value="#4fa3ff">
+          </div>
+        </div>
+        <label>Теги</label>
+        <input type="text" id="routeTags" placeholder="напр. Свідок, Кур'єр (через кому)">
+        <div class="tag-quickpicks" id="tagQuickPicks"></div>
+        <div class="row" style="margin-top:10px;">
+          <button class="primary" id="createRouteBtn" style="width:100%;">+ Створити маршрут</button>
+        </div>
+      </div>
+
+      <!-- ---- Route list: visibility checkbox, colour, tags, points ---- -->
+      <div class="section">
+        <div class="pad" style="padding-bottom:0;">
+          <h2>Маршрути (галочка — показати на карті)</h2>
+          <div class="row">
+            <button class="ghost" id="showAllBtn">☑ Показати всі</button>
+            <button class="ghost" id="hideAllBtn">☐ Сховати всі</button>
+          </div>
+        </div>
+        <ul id="routeList"></ul>
+        <div class="empty" id="emptyMsg">Ще немає маршрутів. Створіть маршрут вище, тоді натисніть «➕» або «⌨» у списку.</div>
+      </div>
+
+      <!-- ---- Display options ---- -->
+      <div class="section pad">
+        <h2>Вигляд</h2>
+        <label class="checkbox-label">
+          <input type="checkbox" id="showLabelsChk">
+          Показувати підписи під точками (дата, час, теги)
+        </label>
+      </div>
+
+      <!-- ---- Data: JSON save/load, CSV log, print/PDF ---- -->
+      <div class="section pad">
+        <h2>Дані</h2>
+        <div class="row">
+          <button id="exportBtn">💾 Зберегти JSON</button>
+          <button id="importBtn">📂 Завантажити JSON</button>
+        </div>
+        <input type="file" id="fileInput" accept="application/json">
+        <div class="row" style="margin-top:8px;">
+          <button id="csvExportBtn">📊 CSV для Excel</button>
+          <button id="printBtn">🖨 Друк / PDF</button>
+        </div>
+        <p class="hint" style="margin-top:10px;">
+          Файл <code>routes.json</code> зберігає всі маршрути й точки. Перенесіть його разом із цими файлами на інший комп'ютер і натисніть «Завантажити JSON», щоб продовжити роботу.
+        </p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============================== MAP ================================ -->
+  <div id="map"></div>
+
+  <!-- Floating bar shown while in "add point" / "add bend" click-mode -->
+  <div id="addModeBar">
+    <span id="addModeText">Клікніть на карті, щоб додати точку</span>
+    <button id="stopAddBtn">Готово</button>
+  </div>
+</div>
+
+<!-- Printable legend — hidden on screen, shown only via @media print (see styles.css) -->
+<div id="printLegend"></div>
+
+<!-- ========================= POINT MODAL ============================= -->
+<div class="overlay" id="pointModalOverlay">
+  <div class="modal">
+    <h3 id="pointModalTitle">Нова точка фіксації</h3>
+
+    <label>Вставити координати з буфера</label>
+    <div class="row">
+      <input type="text" id="ptPasteCoords" placeholder="Вставте (Ctrl+V): 49.5535, 25.5948">
+      <button type="button" id="ptPasteCoordsBtn" title="Спробувати прочитати буфер обміну" style="flex:0 0 auto;">📋</button>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Широта</label>
+        <input type="number" step="any" id="ptLat" placeholder="напр. 49.5535">
+      </div>
+      <div>
+        <label>Довгота</label>
+        <input type="number" step="any" id="ptLng" placeholder="напр. 25.5948">
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Дата</label>
+        <input type="date" id="ptDate">
+      </div>
+      <div>
+        <label>Час</label>
+        <input type="time" id="ptTime">
+      </div>
+    </div>
+
+    <label>Джерело фіксації</label>
+    <select id="ptSourceType">
+      <option value="camera">📹 Відеокамера</option>
+      <option value="dashcam">🎥 Відеореєстратор</option>
+      <option value="other" selected>📍 Інше</option>
+    </select>
+
+    <label>Примітка (необов'язково)</label>
+    <input type="text" id="ptNote" placeholder="напр. вийшов з під'їзду">
+
+    <label>Фото / скан (необов'язково)</label>
+    <div class="photo-zone" id="ptPhotoZone" tabindex="0">
+      Клік — обрати файл, або встав зображення сюди (Ctrl+V)
+      <img id="ptPhotoPreview" style="display:none;">
+    </div>
+    <input type="file" id="ptPhotoFile" accept="image/*" style="display:none;">
+    <button type="button" id="ptPhotoClearBtn" class="ghost" style="display:none;margin-top:6px;width:100%;">✕ Прибрати фото</button>
+    <label style="margin-top:8px;">...або посилання на фото/скан</label>
+    <input type="text" id="ptPhotoUrl" placeholder="https://...">
+
+    <div class="modal-actions">
+      <button class="ghost" id="ptCancel">Скасувати</button>
+      <button class="primary" id="ptSave">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ SCRIPTS ============================== -->
+<!-- Third-party libraries -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<!-- App modules, in dependency order (classic scripts, share the global App namespace) -->
+<script src="js/constants.js"></script>
+<script src="js/state.js"></script>
+<script src="js/map.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/point-modal.js"></script>
+<script src="js/export.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
