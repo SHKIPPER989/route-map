@@ -5,7 +5,7 @@
    for a new point or to edit an existing one, clipboard-paste helpers for
    coordinates and photos, and saving (create or update).
    ============================================================================= */
-const App = window.App || (window.App = {});
+//const App = window.App || (window.App = {});
 
 App.pointModal = {};
 
