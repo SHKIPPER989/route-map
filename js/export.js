@@ -1,11 +1,11 @@
 /* =============================================================================
    export.js
    Everything that leaves the app: JSON save/load (for moving work between
-   computers), a CSV route log (opens directly in Excel), and a print/PDF
-   view with an auto-generated legend of the currently visible routes —
-   a document ready to attach to a case file.
+   computers — includes routes AND standalone POI markers), a CSV route log
+   (opens directly in Excel), and a print/PDF view with an auto-generated
+   legend of the currently visible routes — a document ready to attach to a
+   case file.
    ============================================================================= */
-//const App = window.App || (window.App = {});
 
 App.exportImport = {};
 
@@ -21,9 +21,13 @@ App.exportImport = {};
     URL.revokeObjectURL(a.href);
   }
 
-  // ---- JSON (full data, round-trips everything incl. photos/bends) -------------
+  // ---- JSON (full data, round-trips everything incl. photos/bends/markers) -----
   document.getElementById('exportBtn').addEventListener('click', () => {
-    const data = { exportedAt: new Date().toISOString(), routes: state.routes.map(({ _expanded, ...r }) => r) };
+    const data = {
+      exportedAt: new Date().toISOString(),
+      routes: state.routes.map(({ _expanded, ...r }) => r),
+      markers: state.markers
+    };
     downloadBlob(JSON.stringify(data, null, 2), 'application/json', 'routes.json');
   });
 
@@ -38,8 +42,11 @@ App.exportImport = {};
         const data = JSON.parse(reader.result);
         if(!data || !Array.isArray(data.routes)) throw new Error('bad format');
         state.routes = utils.normalizeRoutes(data.routes);
+        state.markers = utils.normalizeMarkers(data.markers);
         App.pointModal.stopMode();
+        App.poi.cancelPlacing();
         App.map.renderAll();
+        App.poi.renderAll();
         App.sidebar.render();
         const allPts = state.routes.flatMap(r => r.points);
         if(allPts.length) App.map.instance.fitBounds(L.latLngBounds(allPts.map(p => [p.lat, p.lng])).pad(0.2));
