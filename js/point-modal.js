@@ -5,7 +5,6 @@
    for a new point or to edit an existing one, clipboard-paste helpers for
    coordinates and photos, and saving (create or update).
    ============================================================================= */
-//const App = window.App || (window.App = {});
 
 App.pointModal = {};
 
@@ -35,6 +34,7 @@ App.pointModal = {};
 
   // ---- add / bend map-click modes ---------------------------------------------
   function startAddMode(routeId){
+    App.poi.cancelPlacing(); // placing a point and a POI marker at once would be confusing
     state.activeRouteId = routeId;
     state.mode = 'point';
     const r = state.routes.find(r => r.id === routeId);
@@ -45,6 +45,7 @@ App.pointModal = {};
   }
 
   function startBendMode(routeId){
+    App.poi.cancelPlacing();
     state.activeRouteId = routeId;
     state.mode = 'bend';
     const r = state.routes.find(r => r.id === routeId);
@@ -61,30 +62,21 @@ App.pointModal = {};
     App.map.instance.getContainer().style.cursor = '';
     App.sidebar.render();
   }
-  document.getElementById('stopAddBtn').addEventListener('click', stopMode);
+  document.getElementById('stopAddBtn').addEventListener('click', () => { stopMode(); App.poi.cancelPlacing(); });
 
-  // ---- coordinate paste ---------------------------------------------------------
-  // Picks the first two decimal numbers out of arbitrary pasted text, so
-  // "49.5535, 25.5948", "49.5535 25.5948" and text with extra words/symbols
-  // around the numbers all work. Driven purely by the pasted text, so it
-  // needs no clipboard permissions and works when opened straight from disk.
-  function parseCoordsFromText(text){
-    const matches = (text.match(/-?\d+(?:[.,]\d+)?/g) || []).map(s => parseFloat(s.replace(',', '.')));
-    if(matches.length >= 2 && isFinite(matches[0]) && isFinite(matches[1])) return { lat: matches[0], lng: matches[1] };
-    return null;
-  }
+  // ---- coordinate paste (shared parser lives in state.js: App.utils.parseCoordsFromText) ---
   ptPasteCoords.addEventListener('input', () => {
-    const coords = parseCoordsFromText(ptPasteCoords.value);
+    const coords = utils.parseCoordsFromText(ptPasteCoords.value);
     if(coords){ ptLat.value = coords.lat.toFixed(6); ptLng.value = coords.lng.toFixed(6); }
     ptPasteCoords.value = '';
   });
   // Optional convenience button using the async Clipboard API — needs an
-  // https (or localhost) context and user permission, so it can still fail on
-  // GitHub Pages too if the browser blocks it; falls back to asking for Ctrl+V.
+  // https (or localhost) context and user permission, so it can still fail
+  // on GitHub Pages if the browser blocks it; falls back to asking for Ctrl+V.
   ptPasteCoordsBtn.addEventListener('click', async () => {
     try{
       const text = await navigator.clipboard.readText();
-      const coords = parseCoordsFromText(text);
+      const coords = utils.parseCoordsFromText(text);
       if(coords){ ptLat.value = coords.lat.toFixed(6); ptLng.value = coords.lng.toFixed(6); }
       else alert('У буфері не знайдено координат.');
     }catch(err){
