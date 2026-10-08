@@ -1,0 +1,194 @@
+/* =============================================================================
+   poi.js
+   Standalone map markers — Будинок, Авто, Підозрювана особа, Небезпечний
+   об'єкт, Камера, etc. (see constants.MARKER_ICON_TYPES). Unlike route
+   points these aren't part of a timeline; they're simple labeled pins you
+   drop anywhere on the map. Owns: the "Мітки на карті" sidebar section, the
+   marker modal (reuses the same paste-coordinates pattern as point-modal.js),
+   placing a new marker by map click, dragging to reposition, and the
+   "show marker labels" toggle.
+   ============================================================================= */
+
+App.poi = {};
+
+(function(){
+  const { constants, state, utils } = App;
+
+  const poiListEl   = document.getElementById('poiList');
+  const poiEmptyMsg = document.getElementById('poiEmptyMsg');
+  const placeBar    = document.getElementById('poiPlaceBar');
+  const placeText   = document.getElementById('poiPlaceText');
+
+  // ---- modal (reuses the overlay pattern from point-modal.js) -------------------
+  // The icon-type dropdown lives only inside this modal — placing a marker
+  // always confirms/sets its type here, whether just dropped on the map or
+  // opened for editing, so there's no need for a second dropdown in the sidebar.
+  const overlay       = document.getElementById('poiModalOverlay');
+  const modalTitle     = document.getElementById('poiModalTitle');
+  const poiTypeSel     = document.getElementById('poiType');
+  const poiLat         = document.getElementById('poiLat');
+  const poiLng         = document.getElementById('poiLng');
+  const poiPasteCoords = document.getElementById('poiPasteCoords');
+  const poiLabel       = document.getElementById('poiLabel');
+  const poiNote        = document.getElementById('poiNote');
+  let editingMarkerId = null;
+
+  // Icon type dropdown, populated once from constants.
+  poiTypeSel.innerHTML = Object.entries(constants.MARKER_ICON_TYPES)
+    .map(([key, t]) => `<option value="${key}">${t.icon} ${utils.escapeHtml(t.label)}</option>`).join('');
+
+  poiPasteCoords.addEventListener('input', () => {
+    const coords = utils.parseCoordsFromText(poiPasteCoords.value);
+    if(coords){ poiLat.value = coords.lat.toFixed(6); poiLng.value = coords.lng.toFixed(6); }
+    poiPasteCoords.value = '';
+  });
+
+  function openModal(latlng, markerToEdit){
+    editingMarkerId = markerToEdit ? markerToEdit.id : null;
+    modalTitle.textContent = markerToEdit ? 'Редагувати мітку' : 'Нова мітка на карті';
+    poiTypeSel.value = markerToEdit ? markerToEdit.icon : 'other';
+    poiLabel.value = markerToEdit ? markerToEdit.label : '';
+    poiNote.value = markerToEdit ? (markerToEdit.note || '') : '';
+    const ll = markerToEdit ? markerToEdit : latlng;
+    poiLat.value = ll ? ll.lat.toFixed ? ll.lat.toFixed(6) : ll.lat : '';
+    poiLng.value = ll ? ll.lng.toFixed ? ll.lng.toFixed(6) : ll.lng : '';
+    overlay.style.display = 'flex';
+  }
+  function closeModal(){ overlay.style.display = 'none'; editingMarkerId = null; }
+  document.getElementById('poiCancel').addEventListener('click', closeModal);
+
+  document.getElementById('poiSave').addEventListener('click', () => {
+    const latVal = parseFloat(poiLat.value), lngVal = parseFloat(poiLng.value);
+    if(!isFinite(latVal) || !isFinite(lngVal)){ alert('Вкажіть коректні координати'); return; }
+    const label = poiLabel.value.trim() || constants.MARKER_ICON_TYPES[poiTypeSel.value].label;
+    if(editingMarkerId){
+      const m = state.markers.find(m => m.id === editingMarkerId);
+      Object.assign(m, { icon: poiTypeSel.value, label, note: poiNote.value.trim(), lat: latVal, lng: lngVal });
+    } else {
+      state.markers.push({ id: utils.uid('m'), icon: poiTypeSel.value, label, note: poiNote.value.trim(), lat: latVal, lng: lngVal });
+    }
+    closeModal();
+    renderMap();
+    renderList();
+    App.storage.autosave();
+  });
+
+  // ---- "place by map click" mode -------------------------------------------------
+  // Started from the "➕ Додати мітку" button: pick a type + label first, then
+  // click anywhere on the map to drop it there (mirrors the route "add point" flow).
+  document.getElementById('poiAddBtn').addEventListener('click', () => {
+    App.pointModal.stopMode(); // placing a POI and a route point at once would be confusing
+    state.poiPlacing = true;
+    placeText.textContent = 'Клікніть на карті, щоб розмістити мітку';
+    placeBar.style.display = 'flex';
+    App.map.instance.getContainer().style.cursor = 'crosshair';
+  });
+  function cancelPlacing(){
+    state.poiPlacing = null;
+    placeBar.style.display = 'none';
+    App.map.instance.getContainer().style.cursor = '';
+  }
+  document.getElementById('poiPlaceCancelBtn').addEventListener('click', cancelPlacing);
+
+  // Called from map.js's click handler when state.poiPlacing is set. The
+  // modal (with its own type dropdown, defaulting to "Інше") is where the
+  // user actually picks the icon type and label before it's saved.
+  function placeAt(latlng){
+    cancelPlacing();
+    openModal(latlng);
+  }
+
+  // ---- "show marker labels" toggle -----------------------------------------------
+  document.getElementById('showMarkerLabelsChk').addEventListener('change', e => {
+    state.showMarkerLabels = e.target.checked;
+    renderMap();
+  });
+
+  // ---- rendering on the map -------------------------------------------------------
+  const markerLayer = L.layerGroup(); // not clustered — POI markers are usually few and important
+  let leafletMarkersById = {};
+
+  function renderMap(){
+    markerLayer.clearLayers();
+    leafletMarkersById = {};
+    state.markers.forEach(m => {
+      const t = constants.MARKER_ICON_TYPES[m.icon] || constants.MARKER_ICON_TYPES.other;
+      const icon = L.divIcon({
+        className: 'leaflet-div-icon',
+        html: `<div class="poi-icon">${t.icon}</div>`,
+        iconSize: [26, 26], iconAnchor: [13, 13]
+      });
+      const marker = L.marker([m.lat, m.lng], { icon, draggable: true });
+      marker.bindPopup(
+        `<b>${t.icon} ${utils.escapeHtml(m.label)}</b>` +
+        (m.note ? `<br><i>${utils.escapeHtml(m.note)}</i>` : '') +
+        `<br><span class="hint">Перетягніть, щоб уточнити координати</span>` +
+        `<br><a href="#" data-edit-poi="${m.id}">редагувати</a> · ` +
+        `<a href="#" data-del-poi="${m.id}" style="color:#c00;">видалити</a>`
+      );
+      if(state.showMarkerLabels){
+        marker.bindTooltip(utils.escapeHtml(m.label), { permanent: true, direction: 'bottom', className: 'point-label', offset: [0, 12] });
+      }
+      marker.on('dragend', () => {
+        const ll = marker.getLatLng();
+        m.lat = ll.lat; m.lng = ll.lng;
+        App.storage.autosave();
+      });
+      marker.addTo(markerLayer);
+      leafletMarkersById[m.id] = marker;
+    });
+  }
+
+  markerLayer.addTo(App.map.instance); // map.js loads before poi.js, so App.map is already set up
+
+  // Popup "редагувати"/"видалити" link wiring, delegated per popup open (same pattern as map.js).
+  App.map.instance.on('popupopen', e => {
+    const el = e.popup.getElement();
+    el.querySelectorAll('[data-del-poi]').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      deleteMarker(a.getAttribute('data-del-poi'));
+      App.map.instance.closePopup();
+    }));
+    el.querySelectorAll('[data-edit-poi]').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      const m = state.markers.find(m => m.id === a.getAttribute('data-edit-poi'));
+      App.map.instance.closePopup();
+      openModal(null, m);
+    }));
+  });
+
+  function deleteMarker(id){
+    state.markers = state.markers.filter(m => m.id !== id);
+    renderMap();
+    renderList();
+    App.storage.autosave();
+  }
+
+  // ---- sidebar list ------------------------------------------------------------
+  function renderList(){
+    poiListEl.innerHTML = '';
+    poiEmptyMsg.style.display = state.markers.length ? 'none' : 'block';
+    state.markers.forEach(m => {
+      const t = constants.MARKER_ICON_TYPES[m.icon] || constants.MARKER_ICON_TYPES.other;
+      const li = document.createElement('li');
+      li.className = 'poi-item';
+      li.innerHTML = `
+        <span class="poi-icon-sm">${t.icon}</span>
+        <span class="route-name">${utils.escapeHtml(m.label)}</span>
+        <button class="icon-btn" data-poi-edit="${m.id}" title="Редагувати">✎</button>
+        <button class="icon-btn" data-poi-del="${m.id}" title="Видалити">✕</button>
+      `;
+      poiListEl.appendChild(li);
+    });
+  }
+  poiListEl.addEventListener('click', e => {
+    const editBtn = e.target.closest('[data-poi-edit]');
+    const delBtn  = e.target.closest('[data-poi-del]');
+    if(editBtn) openModal(null, state.markers.find(m => m.id === editBtn.getAttribute('data-poi-edit')));
+    if(delBtn) deleteMarker(delBtn.getAttribute('data-poi-del'));
+  });
+
+  function renderAll(){ renderMap(); renderList(); }
+
+  App.poi = { renderAll, placeAt, cancelPlacing };
+})();
