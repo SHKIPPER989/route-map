@@ -68,6 +68,35 @@
         <div class="empty" id="emptyMsg">Ще немає маршрутів. Створіть маршрут вище, тоді натисніть «➕» або «⌨» у списку.</div>
       </div>
 
+      <!-- ---- Bulk import of points (CSV / pasted from Excel or a tracker) ---- -->
+      <div class="section pad">
+        <h2>Масовий імпорт точок</h2>
+        <p class="hint">
+          Перший рядок — заголовки колонок. Розпізнаються: <b>Маршрут, Тип, Дата, Час, Широта, Довгота, Джерело, Примітка</b>
+          (Широта/Довгота — обов'язкові; без колонки «Маршрут» усі рядки підуть в один новий маршрут).
+          Можна вставити текст, скопійований з Excel/Google Таблиць (Ctrl+V), або CSV.
+        </p>
+        <textarea id="bulkImportText" rows="5" placeholder="Маршрут,Тип,Дата,Час,Широта,Довгота,Джерело,Примітка
+Об'єкт №1,Пішохід,2026-09-22,14:35,49.5535,25.5948,Відеокамера,вийшов з під'їзду"></textarea>
+        <button id="bulkImportBtn" style="width:100%;margin-top:8px;">⬆ Імпортувати точки</button>
+      </div>
+
+      <!-- ---- Standalone POI markers (Будинок / Авто / Підозрюваний / ...) ---- -->
+      <div class="section">
+        <div class="pad" style="padding-bottom:0;">
+          <h2>Мітки на карті</h2>
+          <button id="poiAddBtn" style="width:100%;">➕ Додати мітку</button>
+        </div>
+        <ul id="poiList" class="poi-list"></ul>
+        <div class="empty" id="poiEmptyMsg">Міток ще немає.</div>
+        <div class="pad" style="padding-top:8px;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="showMarkerLabelsChk">
+            Показувати підписи під мітками
+          </label>
+        </div>
+      </div>
+
       <!-- ---- Display options ---- -->
       <div class="section pad">
         <h2>Вигляд</h2>
@@ -75,6 +104,20 @@
           <input type="checkbox" id="showLabelsChk">
           Показувати підписи під точками (дата, час, теги)
         </label>
+      </div>
+
+      <!-- ---- Saved browser "plans" (IndexedDB) ---- -->
+      <div class="section pad">
+        <h2>Збережені плани (у цьому браузері)</h2>
+        <select id="plansSelect"></select>
+        <div class="row" style="margin-top:8px;">
+          <button id="planSaveBtn">💾 Зберегти як план</button>
+          <button id="planLoadBtn">📥 Завантажити</button>
+        </div>
+        <button id="planDeleteBtn" class="ghost" style="width:100%;margin-top:8px;">🗑 Видалити обраний план</button>
+        <p class="hint" style="margin-top:10px;">
+          Працює автоматично: поточна робота зберігається у цьому браузері сама, без експорту — навіть після перезавантаження сторінки. Плани — це додаткові іменовані знімки («План 1», «План 2», ...) для порівняння сценаріїв.
+        </p>
       </div>
 
       <!-- ---- Data: JSON save/load, CSV log, print/PDF ---- -->
@@ -90,7 +133,7 @@
           <button id="printBtn">🖨 Друк / PDF</button>
         </div>
         <p class="hint" style="margin-top:10px;">
-          Файл <code>routes.json</code> зберігає всі маршрути й точки. Перенесіть його разом із цими файлами на інший комп'ютер і натисніть «Завантажити JSON», щоб продовжити роботу.
+          Файл <code>routes.json</code> зберігає всі маршрути, точки й мітки. Перенесіть його разом із цими файлами на інший комп'ютер і натисніть «Завантажити JSON», щоб продовжити роботу.
         </p>
       </div>
     </div>
@@ -99,10 +142,26 @@
   <!-- ============================== MAP ================================ -->
   <div id="map"></div>
 
+  <!-- Compact on-map route summary — separate from the full sidebar list -->
+  <div id="routeLegendPanel" class="route-legend-panel">
+    <div class="route-legend-header">
+      <span>Маршрути <span class="route-legend-count"></span></span>
+      <button class="icon-btn" id="legendCollapseBtn" title="Згорнути">⮟</button>
+    </div>
+    <div id="routeLegendList"></div>
+  </div>
+  <button id="legendFab" class="route-legend-fab" title="Показати легенду маршрутів" style="display:none;">🗺️</button>
+
   <!-- Floating bar shown while in "add point" / "add bend" click-mode -->
   <div id="addModeBar">
     <span id="addModeText">Клікніть на карті, щоб додати точку</span>
     <button id="stopAddBtn">Готово</button>
+  </div>
+
+  <!-- Floating bar shown while placing a new POI marker -->
+  <div id="poiPlaceBar">
+    <span id="poiPlaceText">Клікніть на карті, щоб розмістити мітку</span>
+    <button id="poiPlaceCancelBtn">Скасувати</button>
   </div>
 </div>
 
@@ -169,18 +228,59 @@
   </div>
 </div>
 
+<!-- ========================= POI MARKER MODAL ========================= -->
+<div class="overlay" id="poiModalOverlay">
+  <div class="modal">
+    <h3 id="poiModalTitle">Нова мітка на карті</h3>
+
+    <label>Тип</label>
+    <select id="poiType"></select>
+
+    <label>Назва / підпис</label>
+    <input type="text" id="poiLabel" placeholder="напр. Будинок підозрюваного">
+
+    <label>Вставити координати з буфера</label>
+    <div class="row">
+      <input type="text" id="poiPasteCoords" placeholder="Вставте (Ctrl+V): 49.5535, 25.5948">
+    </div>
+    <div class="row">
+      <div>
+        <label>Широта</label>
+        <input type="number" step="any" id="poiLat" placeholder="напр. 49.5535">
+      </div>
+      <div>
+        <label>Довгота</label>
+        <input type="number" step="any" id="poiLng" placeholder="напр. 25.5948">
+      </div>
+    </div>
+
+    <label>Примітка (необов'язково)</label>
+    <input type="text" id="poiNote" placeholder="додаткові деталі">
+
+    <div class="modal-actions">
+      <button class="ghost" id="poiCancel">Скасувати</button>
+      <button class="primary" id="poiSave">Зберегти</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============================ SCRIPTS ============================== -->
 <!-- Third-party libraries -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
-<!-- App modules, in dependency order (classic scripts, share the global App namespace) -->
+<!-- App modules, in dependency order (classic scripts, share the global App namespace).
+     Only constants.js declares `const App` — see the note at the top of that file. -->
 <script src="js/constants.js"></script>
 <script src="js/state.js"></script>
 <script src="js/map.js"></script>
+<script src="js/poi.js"></script>
 <script src="js/sidebar.js"></script>
 <script src="js/point-modal.js"></script>
+<script src="js/bulk-import.js"></script>
+<script src="js/legend.js"></script>
+<script src="js/storage.js"></script>
 <script src="js/export.js"></script>
 <script src="js/main.js"></script>
 </body>
