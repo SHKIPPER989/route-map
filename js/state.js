@@ -6,7 +6,6 @@
    piece of line, draggable points/bends, and the permanent on-map point labels.
    Standalone POI markers (Будинок/Авто/... ) are a separate layer — see poi.js.
    ============================================================================= */
-//const App = window.App || (window.App = {});
 
 App.map = {}; // filled in at the bottom of this IIFE
 
