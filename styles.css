@@ -1,9 +1,10 @@
 /* =============================================================================
    styles.css
    All visual styling for the app. Organized by area: layout shell, sidebar
-   controls & route list, the floating add-mode bar, the point modal (incl.
-   the photo-paste zone), the on-map point label tooltip, and print styles
-   used by the "Друк / PDF" button.
+   controls & route list, POI marker list, bulk-import textarea, the floating
+   add-mode/poi-place bars, the on-map legend panel, both modals (point +
+   POI, incl. the photo-paste zone), on-map marker/label styling, and print
+   styles used by the "Друк / PDF" button.
    ============================================================================= */
 
 /* ---- design tokens ------------------------------------------------------ */
@@ -59,10 +60,11 @@ h2{font-size:12px;text-transform:none;color:var(--text-dim);margin:0 0 8px;}
 label{display:block;font-size:12px;color:var(--text-dim);margin:8px 0 4px;}
 .checkbox-label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer;}
 .checkbox-label input{width:auto;}
-input[type=text], input[type=date], input[type=time], input[type=number], select{
+input[type=text], input[type=date], input[type=time], input[type=number], select, textarea{
   width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);
-  background:var(--panel-2);color:var(--text);font-size:13px;
+  background:var(--panel-2);color:var(--text);font-size:13px;font-family:inherit;
 }
+textarea{resize:vertical;}
 input[type=color]{width:100%;height:32px;border:1px solid var(--border);border-radius:6px;background:var(--panel-2);padding:2px;}
 .row{display:flex;gap:8px;}
 .row > *{flex:1;}
@@ -107,18 +109,49 @@ button:disabled:hover{border-color:var(--border);}
 .tag-edit-btn{font-size:11px;color:var(--text-dim);background:none;border:none;cursor:pointer;padding:0 2px;}
 .tag-edit-btn:hover{color:var(--accent);}
 
-/* ---- floating "add point / add bend" bar --------------------------------- */
-#addModeBar{
+/* ---- POI (standalone icon markers) list ----------------------------------- */
+.poi-list{list-style:none;margin:0;padding:0;}
+.poi-item{display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);}
+.poi-icon-sm{font-size:16px;width:20px;text-align:center;}
+
+/* ---- floating "add point / add bend" and "place marker" bars ------------- */
+#addModeBar, #poiPlaceBar{
   display:none;position:absolute;top:12px;left:356px;z-index:1000;
   background:var(--accent);color:#0e1114;padding:8px 14px;border-radius:8px;
   font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.35);
   align-items:center;gap:10px;max-width:60%;
   transition:left .22s ease;
 }
-#sidebar.collapsed ~ #addModeBar{left:68px;}
-#addModeBar button{background:#0e1114;color:var(--text);border:none;padding:4px 10px;}
+#sidebar.collapsed ~ #addModeBar, #sidebar.collapsed ~ #poiPlaceBar{left:68px;}
+#addModeBar button, #poiPlaceBar button{background:#0e1114;color:var(--text);border:none;padding:4px 10px;}
 
-/* ---- point modal ---------------------------------------------------------- */
+/* ---- on-map route legend panel (separate from the full sidebar list) ----- */
+.route-legend-panel{
+  position:absolute;top:12px;right:12px;z-index:1000;
+  background:var(--panel);border:1px solid var(--border);border-radius:8px;
+  width:220px;max-height:50vh;overflow-y:auto;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+  display:flex;flex-direction:column;
+}
+.route-legend-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 10px;border-bottom:1px solid var(--border);
+  font-size:12px;font-weight:600;color:var(--text);
+}
+.route-legend-count{color:var(--text-dim);font-weight:400;}
+#routeLegendList{padding:6px 10px;}
+.route-legend-item{display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;}
+.route-legend-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.swatch-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.route-legend-fab{
+  position:absolute;top:12px;right:12px;z-index:1000;
+  width:34px;height:34px;border-radius:8px;
+  background:var(--panel);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;font-size:16px;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+}
+
+/* ---- point & POI modals ---------------------------------------------------- */
 #fileInput{display:none;}
 .overlay{
   position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;
@@ -148,9 +181,21 @@ button:disabled:hover{border-color:var(--border);}
   width:22px;height:22px;border-radius:50%;border:2px solid #fff;
   font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,.5);
 }
-/* Permanent date/time/tag label shown under a point when "Показувати
-   підписи" is checked — deliberately black-on-white regardless of the
-   app's dark theme, since it's meant to be read as a printed-style label. */
+/* "Bend" (коліно) waypoint — a small plain draggable dot */
+.bend-dot{
+  width:12px;height:12px;border-radius:50%;border:2px solid #fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.5);
+}
+/* Standalone POI marker (Будинок / Авто / Підозрюваний / ...) */
+.poi-icon{
+  display:flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:6px;
+  background:#fff;border:2px solid var(--accent);
+  font-size:15px;box-shadow:0 1px 3px rgba(0,0,0,.5);
+}
+/* Permanent date/time/tag (or POI name) label shown under a marker when its
+   "Показувати підписи" toggle is on — deliberately black-on-white regardless
+   of the app's dark theme, since it's meant to be read as a printed-style label. */
 .point-label.leaflet-tooltip{
   background:#fff;color:#000;border:1px solid #999;border-radius:4px;
   padding:2px 6px;font-size:11px;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.3);
@@ -160,7 +205,7 @@ button:disabled:hover{border-color:var(--border);}
 /* ---- print / PDF (triggered by the "Друк / PDF" button -> window.print) --- */
 #printLegend{display:none;}
 @media print{
-  #sidebar, #addModeBar, .leaflet-control-container{ display:none !important; }
+  #sidebar, #addModeBar, #poiPlaceBar, .route-legend-panel, .route-legend-fab, .leaflet-control-container{ display:none !important; }
   body, #app{height:auto;}
   #map{width:100%;height:500px;}
   #printLegend{
