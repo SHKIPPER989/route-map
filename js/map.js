@@ -5,7 +5,6 @@
    waypoints), the point-to-segment math used to drop a bend on the nearest
    piece of line, and the permanent on-map point labels.
    ============================================================================= */
-//const App = window.App || (window.App = {});
 
 App.map = {}; // filled in at the bottom of this IIFE
 
