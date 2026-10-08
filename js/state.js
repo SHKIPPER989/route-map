@@ -1,82 +1,236 @@
 /* =============================================================================
-   state.js
-   The single in-memory data model (App.state) plus small pure helper
-   functions (App.utils). Nothing in this file touches the DOM or Leaflet —
-   keeping it that way means the data model stays trivial to export/import
-   and easy to reason about as new features get added.
+   map.js
+   Everything Leaflet-related: base map/tile setup, marker clustering,
+   drawing a route (point markers + polyline + direction arrows + "bend"
+   waypoints), the point-to-segment math used to drop a bend on the nearest
+   piece of line, draggable points/bends, and the permanent on-map point labels.
+   Standalone POI markers (Будинок/Авто/... ) are a separate layer — see poi.js.
    ============================================================================= */
 //const App = window.App || (window.App = {});
 
-// ---- data model -------------------------------------------------------------
-// route:  {id, name, type:'pedestrian'|'vehicle', color, tags:[...], visible,
-//          points:[{id,lat,lng,date,time,sourceType,note,photo}],
-//          bends:[{id,lat,lng,afterPointId,t}]}   // "bends" = коліна (curve waypoints)
-// marker: {id, icon:'home'|'car'|'suspect'|'hazard'|'camera'|'flag'|'other',
-//          label, lat, lng, note}                 // standalone map icon (poi.js)
-App.state = {
-  routes: [],
-  markers: [],           // standalone POI markers — see poi.js
-  activeRouteId: null,    // route currently receiving clicked points/bends
-  mode: null,             // null | 'point' | 'bend'  (what a map click currently does)
-  editingPointId: null,   // {routeId, pointId} while the modal is editing an existing point
-  showLabels: false,      // global toggle: permanent date/time/tag labels under points
-  showMarkerLabels: false, // global toggle: permanent name labels under POI markers
-  poiPlacing: null         // {icon, label, note} while waiting for a map click to place a new POI marker
-};
+App.map = {}; // filled in at the bottom of this IIFE
 
-App.utils = {
-  uid(prefix){ return prefix + Date.now() + '-' + Math.floor(Math.random() * 10000); },
+(function(){
+  const { constants, state, utils } = App;
 
-  escapeHtml(s){
-    return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-  },
+  // ---- base map -------------------------------------------------------------
+  const map = L.map('map', { zoomControl: true }).setView([50.4501, 30.5234], 12); // default view: Kyiv
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
 
-  parseTags(str){
-    return (str || '').split(',').map(s => s.trim()).filter(Boolean);
-  },
+  navigator.geolocation && navigator.geolocation.getCurrentPosition(
+    pos => map.setView([pos.coords.latitude, pos.coords.longitude], 13),
+    () => {}, { timeout: 2000 }
+  );
 
-  // Picks the first two decimal numbers out of arbitrary pasted text, so
-  // "49.5535, 25.5948", "49.5535 25.5948" and text with extra words/symbols
-  // around the numbers all work. Shared by the point modal and the POI
-  // marker modal's "paste coordinates" field.
-  parseCoordsFromText(text){
-    const matches = (text.match(/-?\d+(?:[.,]\d+)?/g) || []).map(s => parseFloat(s.replace(',', '.')));
-    if(matches.length >= 2 && isFinite(matches[0]) && isFinite(matches[1])) return { lat: matches[0], lng: matches[1] };
-    return null;
-  },
+  // All fixation-point markers (across every route) live in one shared
+  // cluster group, so nearby points group together into a single bubble
+  // when zoomed out — useful once a route has many points. Lines, arrow
+  // decorators and "bend" markers are geometry, not individual fixations, so
+  // they stay outside the cluster, in a plain per-route layer group.
+  const clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50 });
+  map.addLayer(clusterGroup);
 
-  // Fills in defaults for routes/points loaded from an older JSON export (or
-  // a saved browser "plan") so newer fields never come back as `undefined`
-  // and break rendering.
-  normalizeRoutes(list){
-    return (list || []).map(r => ({
-      visible: true, tags: [], bends: [],
-      ...r,
-      points: (r.points || []).map(p => ({ sourceType: 'other', photo: null, ...p }))
-    }));
-  },
+  const layerByRoute = {};   // routeId -> L.LayerGroup (polyline + decorator + bend markers)
+  const markersByRoute = {}; // routeId -> [L.Marker, ...] this route's point markers in clusterGroup
 
-  normalizeMarkers(list){
-    return (list || []).map(m => ({ icon: 'other', note: '', ...m }));
-  },
-
-  sortedPoints(route){
-    return [...route.points].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  },
-
-  // Interleaves a route's fixation points and "bend" waypoints into one
-  // ordered lat/lng path, used both for the drawn polyline and the arrow
-  // decorator — this is what makes curved streets possible.
-  buildPathLatLngs(route){
-    const pts = App.utils.sortedPoints(route);
-    const bends = route.bends || [];
-    const latlngs = [];
-    pts.forEach(p => {
-      latlngs.push([p.lat, p.lng]);
-      bends.filter(b => b.afterPointId === p.id)
-           .sort((a, b) => (a.t || 0) - (b.t || 0))
-           .forEach(b => latlngs.push([b.lat, b.lng]));
+  // ---- marker icons ------------------------------------------------------------
+  function makeDivIcon(route, point){
+    const icon = (constants.SOURCE_TYPES[point && point.sourceType] || constants.SOURCE_TYPES.other).icon;
+    return L.divIcon({
+      className: 'leaflet-div-icon',
+      html: `<div class="pt-icon" style="background:${route.color}">${icon}</div>`,
+      iconSize: [22, 22],
+      iconAnchor: [11, 11]
     });
-    return latlngs;
   }
-};
+
+  // Small plain dot used for "bend" waypoints — a real L.marker (not
+  // L.circleMarker) so it can be dragged like any other marker.
+  function makeBendIcon(route){
+    return L.divIcon({
+      className: 'leaflet-div-icon',
+      html: `<div class="bend-dot" style="background:${route.color}"></div>`,
+      iconSize: [12, 12],
+      iconAnchor: [6, 6]
+    });
+  }
+
+  function popupHtml(route, p){
+    const src = constants.SOURCE_TYPES[p.sourceType] || constants.SOURCE_TYPES.other;
+    const photo = p.photo ? `<br><img src="${p.photo}" style="max-width:160px;max-height:120px;border-radius:4px;margin-top:4px;">` : '';
+    return `<b>${route.type === 'vehicle' ? '🚗' : '🚶'} ${utils.escapeHtml(route.name)}</b><br>` +
+      `${src.icon} ${src.label}<br>${p.date} ${p.time}` +
+      (p.note ? `<br><i>${utils.escapeHtml(p.note)}</i>` : '') + photo +
+      `<br><span class="hint">Перетягніть мітку, щоб уточнити координати</span>` +
+      `<br><a href="#" data-edit-point="${route.id}|${p.id}">редагувати</a> · ` +
+      `<a href="#" data-del-point="${route.id}|${p.id}" style="color:#c00;">видалити</a>`;
+  }
+
+  // Permanent label shown under a marker when "Показувати підписи" is on —
+  // combines the route's tags (the "collective" context) with this point's
+  // own date/time (the "individual" detail), per the request.
+  function pointLabelHtml(route, p){
+    const tagPart = (route.tags || []).length ? utils.escapeHtml(route.tags.join(', ')) + ' · ' : '';
+    return `${tagPart}${p.date} ${p.time}`;
+  }
+
+  // ---- "bend" (коліно) geometry helpers ----------------------------------------
+  // Distance from point p to segment v-w in pixel space, plus the projection
+  // fraction t (0 = at v, 1 = at w), used to order multiple bends that land
+  // on the same segment so the curve looks right.
+  function distToSegmentT(p, v, w){
+    const dx = w.x - v.x, dy = w.y - v.y;
+    const l2 = dx * dx + dy * dy;
+    let t = l2 === 0 ? 0 : ((p.x - v.x) * dx + (p.y - v.y) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = v.x + t * dx, projY = v.y + t * dy;
+    return { dist: Math.hypot(p.x - projX, p.y - projY), t };
+  }
+
+  function nearestPointSegment(route, latlng){
+    const pts = utils.sortedPoints(route);
+    if(pts.length < 2) return null;
+    const clickPx = map.latLngToLayerPoint(latlng);
+    let best = null;
+    for(let i = 0; i < pts.length - 1; i++){
+      const vPx = map.latLngToLayerPoint([pts[i].lat, pts[i].lng]);
+      const wPx = map.latLngToLayerPoint([pts[i + 1].lat, pts[i + 1].lng]);
+      const r = distToSegmentT(clickPx, vPx, wPx);
+      if(!best || r.dist < best.dist) best = { dist: r.dist, t: r.t, idx: i };
+    }
+    return best;
+  }
+
+  // Adds a bend to whichever route is in "bend" mode — used both for a brand
+  // new route and for one that already has points (coліна can be added to
+  // any route with 2+ points at any time, see the 📐 button in sidebar.js).
+  function addBendAtLatLng(latlng){
+    const r = state.routes.find(r => r.id === state.activeRouteId);
+    if(!r) return;
+    const seg = nearestPointSegment(r, latlng);
+    if(!seg) return; // shouldn't happen — the "add bend" button is disabled below 2 points
+    const pts = utils.sortedPoints(r);
+    r.bends = r.bends || [];
+    r.bends.push({ id: utils.uid('b'), lat: latlng.lat, lng: latlng.lng, afterPointId: pts[seg.idx].id, t: seg.t });
+    renderRoute(r);
+    App.sidebar.render();
+  }
+
+  function deleteBend(routeId, bendId){
+    const r = state.routes.find(r => r.id === routeId);
+    if(!r) return;
+    r.bends = (r.bends || []).filter(b => b.id !== bendId);
+    renderRoute(r);
+    App.sidebar.render();
+  }
+
+  // ---- rendering ----------------------------------------------------------------
+  // Fully redraws one route's markers + line + bends from its current data.
+  // Safe to call after any edit (add/delete point, move bend, recolor, etc).
+  function renderRoute(route){
+    clearRoute(route.id);
+    if(!route.visible) return;
+
+    const pts = utils.sortedPoints(route);
+
+    // Point markers go into the shared cluster group. Draggable: dropping a
+    // marker updates that point's stored coordinates on dragend.
+    const newMarkers = pts.map(p => {
+      const marker = L.marker([p.lat, p.lng], { icon: makeDivIcon(route, p), draggable: true });
+      marker.bindPopup(popupHtml(route, p));
+      if(state.showLabels){
+        marker.bindTooltip(pointLabelHtml(route, p), { permanent: true, direction: 'bottom', className: 'point-label', offset: [0, 10] });
+      }
+      marker.on('dragend', () => {
+        const ll = marker.getLatLng();
+        p.lat = ll.lat; p.lng = ll.lng;
+        renderRoute(route); // redraw so the line/arrows follow the moved point
+        App.sidebar.render();
+      });
+      return marker;
+    });
+    clusterGroup.addLayers(newMarkers);
+    markersByRoute[route.id] = newMarkers;
+
+    // Line, direction arrows and bend markers go into this route's own layer group.
+    const group = L.layerGroup();
+
+    (route.bends || []).forEach(b => {
+      const bendMarker = L.marker([b.lat, b.lng], { icon: makeBendIcon(route), draggable: true });
+      bendMarker.bindPopup(`<b>Коліно</b><br><span class="hint">Перетягніть, щоб уточнити форму кривої</span><br><a href="#" data-del-bend="${route.id}|${b.id}" style="color:#c00;">видалити коліно</a>`);
+      bendMarker.on('dragend', () => {
+        const ll = bendMarker.getLatLng();
+        b.lat = ll.lat; b.lng = ll.lng;
+        renderRoute(route);
+      });
+      group.addLayer(bendMarker);
+    });
+
+    if(pts.length >= 2){
+      const latlngs = utils.buildPathLatLngs(route);
+      const line = L.polyline(latlngs, { color: route.color, weight: 3, opacity: 0.85 });
+      group.addLayer(line);
+      group.addLayer(L.polylineDecorator(line, {
+        patterns: [{
+          offset: '5%', repeat: '80px',
+          symbol: L.Symbol.arrowHead({ pixelSize: 10, polygon: false, pathOptions: { stroke: true, color: route.color, weight: 2 } })
+        }]
+      }));
+    }
+
+    group.addTo(map);
+    layerByRoute[route.id] = group;
+  }
+
+  // Removes a route's layers from the map without touching its data —
+  // used both at the start of renderRoute() and when a route is deleted.
+  function clearRoute(routeId){
+    if(layerByRoute[routeId]){ map.removeLayer(layerByRoute[routeId]); delete layerByRoute[routeId]; }
+    if(markersByRoute[routeId]){ clusterGroup.removeLayers(markersByRoute[routeId]); delete markersByRoute[routeId]; }
+  }
+
+  function renderAll(){ state.routes.forEach(renderRoute); }
+
+  // Re-draws every visible route's layers without changing any data — used
+  // when the "show labels" checkbox is toggled.
+  function rerenderVisual(){ renderAll(); }
+
+  // Popup contents are plain HTML strings, so their action links (edit/delete
+  // point, delete bend) need to be wired via delegation each time a popup opens.
+  map.on('popupopen', e => {
+    const el = e.popup.getElement();
+    el.querySelectorAll('[data-del-point]').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      const [routeId, pointId] = a.getAttribute('data-del-point').split('|');
+      App.sidebar.deletePoint(routeId, pointId);
+      map.closePopup();
+    }));
+    el.querySelectorAll('[data-edit-point]').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      const [routeId, pointId] = a.getAttribute('data-edit-point').split('|');
+      App.pointModal.openForEdit(routeId, pointId);
+      map.closePopup();
+    }));
+    el.querySelectorAll('[data-del-bend]').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      const [routeId, bendId] = a.getAttribute('data-del-bend').split('|');
+      deleteBend(routeId, bendId);
+      map.closePopup();
+    }));
+  });
+
+  // Map clicks only do something while an "add point" or "add bend" mode is
+  // active (started from the sidebar — see point-modal.js), or while placing
+  // a new POI marker (see poi.js).
+  map.on('click', e => {
+    if(state.poiPlacing){ App.poi.placeAt(e.latlng); return; }
+    if(!state.activeRouteId) return;
+    if(state.mode === 'point') App.pointModal.openForAdd(e.latlng);
+    else if(state.mode === 'bend') addBendAtLatLng(e.latlng);
+  });
+
+  App.map = { instance: map, renderRoute, renderAll, rerenderVisual, clearRoute, deleteBend };
+})();
