@@ -5,8 +5,10 @@
    and the "show labels" checkbox. Point *creation/editing* lives in
    point-modal.js; this file owns point *deletion* (shared with the map
    popups in map.js) and the points table shown when a route is expanded.
+   Every call to render() also refreshes the on-map legend (legend.js) and
+   triggers a debounced autosave to IndexedDB (storage.js) — it's the de
+   facto "something changed" hook for the whole app.
    ============================================================================= */
-//const App = window.App || (window.App = {});
 
 App.sidebar = {};
 
@@ -154,6 +156,9 @@ App.sidebar = {};
 
       routeListEl.appendChild(li);
     });
+
+    App.legend.render();    // keep the on-map route summary panel in sync
+    App.storage.autosave(); // debounced save to IndexedDB — see storage.js
   }
 
   // ---- list click/edit event delegation -----------------------------------------
