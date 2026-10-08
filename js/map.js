@@ -3,7 +3,8 @@
    Everything Leaflet-related: base map/tile setup, marker clustering,
    drawing a route (point markers + polyline + direction arrows + "bend"
    waypoints), the point-to-segment math used to drop a bend on the nearest
-   piece of line, and the permanent on-map point labels.
+   piece of line, draggable points/bends, and the permanent on-map point labels.
+   Standalone POI markers (Будинок/Авто/... ) are a separate layer — see poi.js.
    ============================================================================= */
 
 App.map = {}; // filled in at the bottom of this IIFE
@@ -26,15 +27,15 @@ App.map = {}; // filled in at the bottom of this IIFE
   // All fixation-point markers (across every route) live in one shared
   // cluster group, so nearby points group together into a single bubble
   // when zoomed out — useful once a route has many points. Lines, arrow
-  // decorators and "bend" dots are geometry, not individual fixations, so
+  // decorators and "bend" markers are geometry, not individual fixations, so
   // they stay outside the cluster, in a plain per-route layer group.
   const clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50 });
   map.addLayer(clusterGroup);
 
-  const layerByRoute = {};   // routeId -> L.LayerGroup (polyline + decorator + bend dots)
-  const markersByRoute = {}; // routeId -> [L.Marker, ...] this route's markers in clusterGroup
+  const layerByRoute = {};   // routeId -> L.LayerGroup (polyline + decorator + bend markers)
+  const markersByRoute = {}; // routeId -> [L.Marker, ...] this route's point markers in clusterGroup
 
-  // ---- marker icon ------------------------------------------------------------
+  // ---- marker icons ------------------------------------------------------------
   function makeDivIcon(route, point){
     const icon = (constants.SOURCE_TYPES[point && point.sourceType] || constants.SOURCE_TYPES.other).icon;
     return L.divIcon({
@@ -45,12 +46,24 @@ App.map = {}; // filled in at the bottom of this IIFE
     });
   }
 
+  // Small plain dot used for "bend" waypoints — a real L.marker (not
+  // L.circleMarker) so it can be dragged like any other marker.
+  function makeBendIcon(route){
+    return L.divIcon({
+      className: 'leaflet-div-icon',
+      html: `<div class="bend-dot" style="background:${route.color}"></div>`,
+      iconSize: [12, 12],
+      iconAnchor: [6, 6]
+    });
+  }
+
   function popupHtml(route, p){
     const src = constants.SOURCE_TYPES[p.sourceType] || constants.SOURCE_TYPES.other;
     const photo = p.photo ? `<br><img src="${p.photo}" style="max-width:160px;max-height:120px;border-radius:4px;margin-top:4px;">` : '';
     return `<b>${route.type === 'vehicle' ? '🚗' : '🚶'} ${utils.escapeHtml(route.name)}</b><br>` +
       `${src.icon} ${src.label}<br>${p.date} ${p.time}` +
       (p.note ? `<br><i>${utils.escapeHtml(p.note)}</i>` : '') + photo +
+      `<br><span class="hint">Перетягніть мітку, щоб уточнити координати</span>` +
       `<br><a href="#" data-edit-point="${route.id}|${p.id}">редагувати</a> · ` +
       `<a href="#" data-del-point="${route.id}|${p.id}" style="color:#c00;">видалити</a>`;
   }
@@ -90,6 +103,9 @@ App.map = {}; // filled in at the bottom of this IIFE
     return best;
   }
 
+  // Adds a bend to whichever route is in "bend" mode — used both for a brand
+  // new route and for one that already has points (coліна can be added to
+  // any route with 2+ points at any time, see the 📐 button in sidebar.js).
   function addBendAtLatLng(latlng){
     const r = state.routes.find(r => r.id === state.activeRouteId);
     if(!r) return;
@@ -119,24 +135,36 @@ App.map = {}; // filled in at the bottom of this IIFE
 
     const pts = utils.sortedPoints(route);
 
-    // Point markers go into the shared cluster group.
+    // Point markers go into the shared cluster group. Draggable: dropping a
+    // marker updates that point's stored coordinates on dragend.
     const newMarkers = pts.map(p => {
-      const marker = L.marker([p.lat, p.lng], { icon: makeDivIcon(route, p) });
+      const marker = L.marker([p.lat, p.lng], { icon: makeDivIcon(route, p), draggable: true });
       marker.bindPopup(popupHtml(route, p));
       if(state.showLabels){
         marker.bindTooltip(pointLabelHtml(route, p), { permanent: true, direction: 'bottom', className: 'point-label', offset: [0, 10] });
       }
+      marker.on('dragend', () => {
+        const ll = marker.getLatLng();
+        p.lat = ll.lat; p.lng = ll.lng;
+        renderRoute(route); // redraw so the line/arrows follow the moved point
+        App.sidebar.render();
+      });
       return marker;
     });
     clusterGroup.addLayers(newMarkers);
     markersByRoute[route.id] = newMarkers;
 
-    // Line, direction arrows and bend dots go into this route's own layer group.
+    // Line, direction arrows and bend markers go into this route's own layer group.
     const group = L.layerGroup();
 
     (route.bends || []).forEach(b => {
-      const bendMarker = L.circleMarker([b.lat, b.lng], { radius: 5, color: '#fff', weight: 2, fillColor: route.color, fillOpacity: 1 });
-      bendMarker.bindPopup(`<b>Коліно</b><br><a href="#" data-del-bend="${route.id}|${b.id}" style="color:#c00;">видалити коліно</a>`);
+      const bendMarker = L.marker([b.lat, b.lng], { icon: makeBendIcon(route), draggable: true });
+      bendMarker.bindPopup(`<b>Коліно</b><br><span class="hint">Перетягніть, щоб уточнити форму кривої</span><br><a href="#" data-del-bend="${route.id}|${b.id}" style="color:#c00;">видалити коліно</a>`);
+      bendMarker.on('dragend', () => {
+        const ll = bendMarker.getLatLng();
+        b.lat = ll.lat; b.lng = ll.lng;
+        renderRoute(route);
+      });
       group.addLayer(bendMarker);
     });
 
@@ -194,8 +222,10 @@ App.map = {}; // filled in at the bottom of this IIFE
   });
 
   // Map clicks only do something while an "add point" or "add bend" mode is
-  // active (started from the sidebar — see point-modal.js).
+  // active (started from the sidebar — see point-modal.js), or while placing
+  // a new POI marker (see poi.js).
   map.on('click', e => {
+    if(state.poiPlacing){ App.poi.placeAt(e.latlng); return; }
     if(!state.activeRouteId) return;
     if(state.mode === 'point') App.pointModal.openForAdd(e.latlng);
     else if(state.mode === 'bend') addBendAtLatLng(e.latlng);
