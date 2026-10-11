@@ -11,6 +11,15 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <link rel="stylesheet" href="styles.css" />
+<!-- Remembers any <script> that failed to load (404 / wrong file name) so the
+     self-check at the bottom of the page can name it. Must run before the app scripts. -->
+<script>
+  window.__failedScripts = [];
+  window.addEventListener('error', function(e){
+    var t = e.target;
+    if(t && t.tagName === 'SCRIPT') window.__failedScripts.push(t.getAttribute('src'));
+  }, true);
+</script>
 </head>
 <body>
 <div id="app">
@@ -103,6 +112,10 @@
         <label class="checkbox-label">
           <input type="checkbox" id="showLabelsChk">
           Показувати підписи під точками (дата, час, теги)
+        </label>
+        <label class="checkbox-label" style="margin-top:8px;">
+          <input type="checkbox" id="showPhotosChk" checked>
+          Показувати фото біля точок
         </label>
       </div>
 
@@ -212,12 +225,15 @@
     <input type="text" id="ptNote" placeholder="напр. вийшов з під'їзду">
 
     <label>Фото / скан (необов'язково)</label>
-    <div class="photo-zone" id="ptPhotoZone" tabindex="0">
-      Клік — обрати файл, або встав зображення сюди (Ctrl+V)
+    <div class="photo-zone" id="ptPhotoZone">
+      Вставте зображення з буфера обміну (Ctrl+V) — спрацює де завгодно у цьому вікні
       <img id="ptPhotoPreview" style="display:none;">
     </div>
     <input type="file" id="ptPhotoFile" accept="image/*" style="display:none;">
-    <button type="button" id="ptPhotoClearBtn" class="ghost" style="display:none;margin-top:6px;width:100%;">✕ Прибрати фото</button>
+    <div class="row" style="margin-top:6px;">
+      <button type="button" id="ptPhotoPickBtn">📂 Обрати файл</button>
+      <button type="button" id="ptPhotoClearBtn" class="ghost" style="display:none;">✕ Прибрати фото</button>
+    </div>
     <label style="margin-top:8px;">...або посилання на фото/скан</label>
     <input type="text" id="ptPhotoUrl" placeholder="https://...">
 
@@ -275,6 +291,7 @@
 <script src="js/constants.js"></script>
 <script src="js/state.js"></script>
 <script src="js/map.js"></script>
+<script src="js/photo-cards.js"></script>
 <script src="js/poi.js"></script>
 <script src="js/sidebar.js"></script>
 <script src="js/point-modal.js"></script>
@@ -283,5 +300,40 @@
 <script src="js/storage.js"></script>
 <script src="js/export.js"></script>
 <script src="js/main.js"></script>
+
+<!-- ====================== LOAD SELF-CHECK ============================
+     If a file was uploaded under the wrong name (e.g. "poi" instead of
+     "poi.js") or contains the wrong code (e.g. map.js pasted into state.js),
+     buttons would otherwise break one by one with no explanation. This
+     shows a red bar naming the culprits instead. Add new modules here too. -->
+<script>
+(function(){
+  var modules = {
+    'js/constants.js':   function(){ return window.App && App.constants; },
+    'js/state.js':       function(){ return window.App && App.state && App.utils; },
+    'js/map.js':         function(){ return window.App && App.map && App.map.instance && App.map.renderRoute; },
+    'js/photo-cards.js': function(){ return window.App && App.photoCards && App.photoCards.html; },
+    'js/poi.js':         function(){ return window.App && App.poi && App.poi.renderAll; },
+    'js/sidebar.js':     function(){ return window.App && App.sidebar && App.sidebar.render; },
+    'js/point-modal.js': function(){ return window.App && App.pointModal && App.pointModal.openForAdd; },
+    'js/bulk-import.js': function(){ return window.App && App.bulkImport; },
+    'js/legend.js':      function(){ return window.App && App.legend && App.legend.render; },
+    'js/storage.js':     function(){ return window.App && App.storage && App.storage.autosave; },
+    'js/export.js':      function(){ return window.App && App.exportImport && App.exportImport.downloadBlob; }
+  };
+  var bad = [];
+  Object.keys(modules).forEach(function(f){ var ok = false; try { ok = !!modules[f](); } catch(e) {} if(!ok) bad.push(f); });
+  var failed = window.__failedScripts || [];
+  if(!bad.length && !failed.length) return;
+  var bar = document.createElement('div');
+  bar.id = 'loadBanner';
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#c0392b;color:#fff;padding:10px 16px;font:13px/1.4 sans-serif;';
+  bar.textContent = '⚠ Застосунок завантажився не повністю. ' +
+    (failed.length ? 'Файли не знайдено: ' + failed.join(', ') + '. ' : '') +
+    (bad.length ? 'Не працюють модулі: ' + bad.join(', ') + ' — перевірте, що назва файлу точна (разом із «.js») і всередині саме його код. ' : '') +
+    'Після виправлення оновіть сторінку (Ctrl+F5).';
+  document.body.appendChild(bar);
+})();
+</script>
 </body>
 </html>

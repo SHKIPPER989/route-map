@@ -5,6 +5,7 @@
    for a new point or to edit an existing one, clipboard-paste helpers for
    coordinates and photos, and saving (create or update).
    ============================================================================= */
+//const App = window.App || (window.App = {});
 
 App.pointModal = {};
 
@@ -25,7 +26,7 @@ App.pointModal = {};
   const ptSourceType      = document.getElementById('ptSourceType');
   const ptNote            = document.getElementById('ptNote');
   const ptPhotoUrl        = document.getElementById('ptPhotoUrl');
-  const ptPhotoZone       = document.getElementById('ptPhotoZone');
+  const ptPhotoPickBtn    = document.getElementById('ptPhotoPickBtn');
   const ptPhotoFile       = document.getElementById('ptPhotoFile');
   const ptPhotoPreview    = document.getElementById('ptPhotoPreview');
   const ptPhotoClearBtn   = document.getElementById('ptPhotoClearBtn');
@@ -33,11 +34,18 @@ App.pointModal = {};
   let pendingPhotoData = null; // base64 data: URI captured via paste/file, or null
 
   // ---- add / bend map-click modes ---------------------------------------------
+  // Adding points/bends to a route that's currently hidden would look like
+  // "nothing happens", so switch it back on first.
+  function ensureVisible(r){
+    if(!r.visible){ r.visible = true; App.map.renderRoute(r); }
+  }
+
   function startAddMode(routeId){
     App.poi.cancelPlacing(); // placing a point and a POI marker at once would be confusing
     state.activeRouteId = routeId;
     state.mode = 'point';
     const r = state.routes.find(r => r.id === routeId);
+    ensureVisible(r);
     addModeText.textContent = `Клікніть на карті, щоб додати точку до «${r.name}» (або ⌨ у списку — ввести координати)`;
     addModeBar.style.display = 'flex';
     App.map.instance.getContainer().style.cursor = 'crosshair';
@@ -49,6 +57,7 @@ App.pointModal = {};
     state.activeRouteId = routeId;
     state.mode = 'bend';
     const r = state.routes.find(r => r.id === routeId);
+    ensureVisible(r);
     addModeText.textContent = `Клікніть на карті біля потрібного відрізка «${r.name}», щоб додати коліно`;
     addModeBar.style.display = 'flex';
     App.map.instance.getContainer().style.cursor = 'crosshair';
@@ -85,6 +94,35 @@ App.pointModal = {};
   });
 
   // ---- photo attach (paste or file) ----------------------------------------------
+  // Big images (typically PNG screenshots from the clipboard) are scaled down to
+  // at most 1280px on the long side and re-encoded as JPEG — otherwise a few
+  // photos would bloat the browser autosave and the exported routes.json.
+  function compressImageFile(file){
+    return new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onerror = () => resolve(null);
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        const img = new Image();
+        img.onerror = () => resolve(dataUrl);
+        img.onload = () => {
+          const MAX = 1280;
+          const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+          if(scale === 1 && dataUrl.length < 400000){ resolve(dataUrl); return; } // already small
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.naturalWidth * scale);
+          canvas.height = Math.round(img.naturalHeight * scale);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); // JPEG has no transparency
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   function setPhotoPreview(dataUrlOrUrl){
     pendingPhotoData = dataUrlOrUrl;
     if(dataUrlOrUrl){
@@ -96,26 +134,28 @@ App.pointModal = {};
       ptPhotoClearBtn.style.display = 'none';
     }
   }
-  ptPhotoZone.addEventListener('paste', e => {
+
+  // Ctrl+V anywhere while the modal is open: if the clipboard holds an image,
+  // attach it. (Plain-text pastes, e.g. into the coordinates field, are left alone.)
+  document.addEventListener('paste', e => {
+    if(overlay.style.display !== 'flex') return;
     const items = (e.clipboardData && e.clipboardData.items) || [];
     for(const item of items){
       if(item.type && item.type.startsWith('image/')){
         const file = item.getAsFile();
-        const reader = new FileReader();
-        reader.onload = () => setPhotoPreview(reader.result);
-        reader.readAsDataURL(file);
+        if(!file) continue;
         e.preventDefault();
+        compressImageFile(file).then(url => { if(url) setPhotoPreview(url); });
         return;
       }
     }
   });
-  ptPhotoZone.addEventListener('click', () => ptPhotoFile.click());
+  ptPhotoPickBtn.addEventListener('click', () => ptPhotoFile.click());
   ptPhotoFile.addEventListener('change', e => {
     const file = e.target.files[0];
+    e.target.value = ''; // allow picking the same file again later
     if(!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setPhotoPreview(reader.result);
-    reader.readAsDataURL(file);
+    compressImageFile(file).then(url => { if(url) setPhotoPreview(url); });
   });
   ptPhotoClearBtn.addEventListener('click', () => setPhotoPreview(null));
 

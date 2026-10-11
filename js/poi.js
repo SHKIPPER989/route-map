@@ -8,6 +8,7 @@
    placing a new marker by map click, dragging to reposition, and the
    "show marker labels" toggle.
    ============================================================================= */
+//const App = window.App || (window.App = {});
 
 App.poi = {};
 

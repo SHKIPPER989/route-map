@@ -7,6 +7,7 @@
    delimiter — good enough for typical tracker exports, documented as a
    known limitation in the UI hint text.
    ============================================================================= */
+//const App = window.App || (window.App = {});
 
 App.bulkImport = {};
 

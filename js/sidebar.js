@@ -9,6 +9,7 @@
    triggers a debounced autosave to IndexedDB (storage.js) — it's the de
    facto "something changed" hook for the whole app.
    ============================================================================= */
+//const App = window.App || (window.App = {});
 
 App.sidebar = {};
 
@@ -140,6 +141,7 @@ App.sidebar = {};
                 <td>${(constants.SOURCE_TYPES[p.sourceType] || constants.SOURCE_TYPES.other).icon}</td>
                 <td>${utils.escapeHtml(p.note || '')}</td>
                 <td>
+                  ${p.photo ? `<button class="icon-btn" data-toggle-photo-row="${route.id}|${p.id}" title="Показати/сховати фото на карті">🖼</button>` : ''}
                   <button class="icon-btn" data-edit-point-row="${route.id}|${p.id}" title="Редагувати">✎</button>
                   <button class="icon-btn" data-del-point-row="${route.id}|${p.id}" title="Видалити">✕</button>
                 </td>
@@ -171,6 +173,7 @@ App.sidebar = {};
     const delRoute       = e.target.closest('[data-del-route]');
     const delPointRow    = e.target.closest('[data-del-point-row]');
     const editPointRow   = e.target.closest('[data-edit-point-row]');
+    const togglePhotoRow = e.target.closest('[data-toggle-photo-row]');
     const editTags        = e.target.closest('[data-edit-tags]');
 
     if(vis){
@@ -197,6 +200,10 @@ App.sidebar = {};
     if(editPointRow){
       const [routeId, pointId] = editPointRow.getAttribute('data-edit-point-row').split('|');
       App.pointModal.openForEdit(routeId, pointId);
+    }
+    if(togglePhotoRow){
+      const [routeId, pointId] = togglePhotoRow.getAttribute('data-toggle-photo-row').split('|');
+      App.photoCards.toggle(routeId, pointId);
     }
     if(editTags){
       const r = state.routes.find(r => r.id === editTags.getAttribute('data-edit-tags'));

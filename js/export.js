@@ -6,6 +6,7 @@
    legend of the currently visible routes — a document ready to attach to a
    case file.
    ============================================================================= */
+//const App = window.App || (window.App = {});
 
 App.exportImport = {};
 

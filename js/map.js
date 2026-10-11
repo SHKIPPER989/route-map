@@ -2,10 +2,12 @@
    map.js
    Everything Leaflet-related: base map/tile setup, marker clustering,
    drawing a route (point markers + polyline + direction arrows + "bend"
-   waypoints), the point-to-segment math used to drop a bend on the nearest
-   piece of line, draggable points/bends, and the permanent on-map point labels.
+   waypoints), the geometry used to drop a bend onto the nearest piece of the
+   drawn line, draggable points/bends, and the permanent on-map point labels.
    Standalone POI markers (Будинок/Авто/... ) are a separate layer — see poi.js.
+   Photo cards shown next to points are built by photo-cards.js.
    ============================================================================= */
+//const App = window.App || (window.App = {});
 
 App.map = {}; // filled in at the bottom of this IIFE
 
@@ -36,11 +38,15 @@ App.map = {}; // filled in at the bottom of this IIFE
   const markersByRoute = {}; // routeId -> [L.Marker, ...] this route's point markers in clusterGroup
 
   // ---- marker icons ------------------------------------------------------------
+  // The point icon is a 22px circle; when the point has a visible photo, the
+  // photo card (+ its leader line) is appended INSIDE the same icon element,
+  // so it moves, clusters and zooms together with the point.
   function makeDivIcon(route, point){
     const icon = (constants.SOURCE_TYPES[point && point.sourceType] || constants.SOURCE_TYPES.other).icon;
+    const card = App.photoCards ? App.photoCards.html(route, point) : '';
     return L.divIcon({
       className: 'leaflet-div-icon',
-      html: `<div class="pt-icon" style="background:${route.color}">${icon}</div>`,
+      html: `<div class="pt-icon" style="background:${route.color}">${icon}</div>${card}`,
       iconSize: [22, 22],
       iconAnchor: [11, 11]
     });
@@ -59,10 +65,15 @@ App.map = {}; // filled in at the bottom of this IIFE
 
   function popupHtml(route, p){
     const src = constants.SOURCE_TYPES[p.sourceType] || constants.SOURCE_TYPES.other;
-    const photo = p.photo ? `<br><img src="${p.photo}" style="max-width:160px;max-height:120px;border-radius:4px;margin-top:4px;">` : '';
+    const cardShown = App.photoCards && App.photoCards.isShown(p);
+    // The thumbnail is only needed in the popup while the photo card itself isn't on the map.
+    const photo = (p.photo && !cardShown)
+      ? `<br><img src="${utils.escapeHtml(p.photo)}" style="max-width:160px;max-height:120px;border-radius:4px;margin-top:4px;">` : '';
+    const photoToggle = p.photo
+      ? `<br><a href="#" data-toggle-photo="${route.id}|${p.id}">${p.photoCard && p.photoCard.hidden ? 'показати' : 'сховати'} фото на карті</a>` : '';
     return `<b>${route.type === 'vehicle' ? '🚗' : '🚶'} ${utils.escapeHtml(route.name)}</b><br>` +
       `${src.icon} ${src.label}<br>${p.date} ${p.time}` +
-      (p.note ? `<br><i>${utils.escapeHtml(p.note)}</i>` : '') + photo +
+      (p.note ? `<br><i>${utils.escapeHtml(p.note)}</i>` : '') + photo + photoToggle +
       `<br><span class="hint">Перетягніть мітку, щоб уточнити координати</span>` +
       `<br><a href="#" data-edit-point="${route.id}|${p.id}">редагувати</a> · ` +
       `<a href="#" data-del-point="${route.id}|${p.id}" style="color:#c00;">видалити</a>`;
@@ -76,44 +87,55 @@ App.map = {}; // filled in at the bottom of this IIFE
     return `${tagPart}${p.date} ${p.time}`;
   }
 
-  // ---- "bend" (коліно) geometry helpers ----------------------------------------
-  // Distance from point p to segment v-w in pixel space, plus the projection
-  // fraction t (0 = at v, 1 = at w), used to order multiple bends that land
-  // on the same segment so the curve looks right.
-  function distToSegmentT(p, v, w){
+  // ---- "bend" (коліно) geometry ------------------------------------------------
+  // Distance (in screen pixels) from point p to the segment v-w.
+  function distToSegment(p, v, w){
     const dx = w.x - v.x, dy = w.y - v.y;
     const l2 = dx * dx + dy * dy;
     let t = l2 === 0 ? 0 : ((p.x - v.x) * dx + (p.y - v.y) * dy) / l2;
     t = Math.max(0, Math.min(1, t));
-    const projX = v.x + t * dx, projY = v.y + t * dy;
-    return { dist: Math.hypot(p.x - projX, p.y - projY), t };
+    return Math.hypot(p.x - (v.x + t * dx), p.y - (v.y + t * dy));
   }
 
-  function nearestPointSegment(route, latlng){
-    const pts = utils.sortedPoints(route);
-    if(pts.length < 2) return null;
+  // Finds the piece of the *drawn* line (points AND already-placed bends)
+  // that is closest to the click, and returns the node it starts at. Using
+  // the real line — not the straight chord between two fixation points — is
+  // what keeps curved / hairpin streets in the right order when several
+  // bends are added. Ties go to the earlier segment (the epsilon avoids
+  // floating-point noise deciding it).
+  function nearestPathSegment(route, latlng){
+    const nodes = utils.buildNodes(route);
+    if(nodes.length < 2) return null;
     const clickPx = map.latLngToLayerPoint(latlng);
     let best = null;
-    for(let i = 0; i < pts.length - 1; i++){
-      const vPx = map.latLngToLayerPoint([pts[i].lat, pts[i].lng]);
-      const wPx = map.latLngToLayerPoint([pts[i + 1].lat, pts[i + 1].lng]);
-      const r = distToSegmentT(clickPx, vPx, wPx);
-      if(!best || r.dist < best.dist) best = { dist: r.dist, t: r.t, idx: i };
+    for(let i = 0; i < nodes.length - 1; i++){
+      const d = distToSegment(clickPx,
+        map.latLngToLayerPoint([nodes[i].lat, nodes[i].lng]),
+        map.latLngToLayerPoint([nodes[i + 1].lat, nodes[i + 1].lng]));
+      if(!best || d < best.dist - 1e-6) best = { dist: d, prev: nodes[i] };
     }
     return best;
   }
 
-  // Adds a bend to whichever route is in "bend" mode — used both for a brand
-  // new route and for one that already has points (coліна can be added to
-  // any route with 2+ points at any time, see the 📐 button in sidebar.js).
+  // Adds a bend to whichever route is in "bend" mode. Works for any route
+  // with 2+ points, new or old (see the 📐 button in sidebar.js). The bend is
+  // spliced into route.bends right after the node it follows, so array order
+  // always equals drawing order.
   function addBendAtLatLng(latlng){
     const r = state.routes.find(r => r.id === state.activeRouteId);
     if(!r) return;
-    const seg = nearestPointSegment(r, latlng);
+    const seg = nearestPathSegment(r, latlng);
     if(!seg) return; // shouldn't happen — the "add bend" button is disabled below 2 points
-    const pts = utils.sortedPoints(r);
     r.bends = r.bends || [];
-    r.bends.push({ id: utils.uid('b'), lat: latlng.lat, lng: latlng.lng, afterPointId: pts[seg.idx].id, t: seg.t });
+    const prev = seg.prev;
+    const bend = { id: utils.uid('b'), lat: latlng.lat, lng: latlng.lng, afterPointId: prev.anchorId };
+    let at;
+    if(prev.kind === 'bend') at = r.bends.findIndex(b => b.id === prev.id) + 1;      // right after the previous bend
+    else {                                                                              // right after the point itself,
+      at = r.bends.findIndex(b => b.afterPointId === prev.id);                          // i.e. before its other bends
+      if(at === -1) at = r.bends.length;
+    }
+    r.bends.splice(at, 0, bend);
     renderRoute(r);
     App.sidebar.render();
   }
@@ -136,9 +158,13 @@ App.map = {}; // filled in at the bottom of this IIFE
     const pts = utils.sortedPoints(route);
 
     // Point markers go into the shared cluster group. Draggable: dropping a
-    // marker updates that point's stored coordinates on dragend.
+    // marker updates that point's stored coordinates on dragend. Points with a
+    // visible photo card get a z-index boost so the card sits above other markers.
     const newMarkers = pts.map(p => {
-      const marker = L.marker([p.lat, p.lng], { icon: makeDivIcon(route, p), draggable: true });
+      const marker = L.marker([p.lat, p.lng], {
+        icon: makeDivIcon(route, p), draggable: true,
+        zIndexOffset: (App.photoCards && App.photoCards.isShown(p)) ? 1000 : 0
+      });
       marker.bindPopup(popupHtml(route, p));
       if(state.showLabels){
         marker.bindTooltip(pointLabelHtml(route, p), { permanent: true, direction: 'bottom', className: 'point-label', offset: [0, 10] });
@@ -153,6 +179,7 @@ App.map = {}; // filled in at the bottom of this IIFE
     });
     clusterGroup.addLayers(newMarkers);
     markersByRoute[route.id] = newMarkers;
+    if(App.photoCards) App.photoCards.schedule(); // fix leader lines once the new icons are laid out
 
     // Line, direction arrows and bend markers go into this route's own layer group.
     const group = L.layerGroup();
@@ -164,6 +191,7 @@ App.map = {}; // filled in at the bottom of this IIFE
         const ll = bendMarker.getLatLng();
         b.lat = ll.lat; b.lng = ll.lng;
         renderRoute(route);
+        App.storage.autosave();
       });
       group.addLayer(bendMarker);
     });
@@ -194,11 +222,11 @@ App.map = {}; // filled in at the bottom of this IIFE
   function renderAll(){ state.routes.forEach(renderRoute); }
 
   // Re-draws every visible route's layers without changing any data — used
-  // when the "show labels" checkbox is toggled.
+  // when a "show labels" / "show photos" checkbox is toggled.
   function rerenderVisual(){ renderAll(); }
 
   // Popup contents are plain HTML strings, so their action links (edit/delete
-  // point, delete bend) need to be wired via delegation each time a popup opens.
+  // point, delete bend, show/hide photo) are wired via delegation each time a popup opens.
   map.on('popupopen', e => {
     const el = e.popup.getElement();
     el.querySelectorAll('[data-del-point]').forEach(a => a.addEventListener('click', ev => {
@@ -217,6 +245,12 @@ App.map = {}; // filled in at the bottom of this IIFE
       ev.preventDefault();
       const [routeId, bendId] = a.getAttribute('data-del-bend').split('|');
       deleteBend(routeId, bendId);
+      map.closePopup();
+    }));
+    el.querySelectorAll('[data-toggle-photo]').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      const [routeId, pointId] = a.getAttribute('data-toggle-photo').split('|');
+      App.photoCards.toggle(routeId, pointId);
       map.closePopup();
     }));
   });

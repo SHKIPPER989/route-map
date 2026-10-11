@@ -150,7 +150,9 @@ App.storage = {};
     deleteRecord(name).then(refreshPlansDropdown);
   });
 
-  refreshPlansDropdown();
+  refreshPlansDropdown().catch(() => {
+    plansSelect.innerHTML = '<option value="">— сховище браузера недоступне —</option>';
+  });
 
   App.storage = { autosave, loadAutosave, refreshPlansDropdown };
 })();
