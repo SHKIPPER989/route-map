@@ -22,7 +22,7 @@ App.state = {
   routes: [],
   markers: [],            // standalone POI markers — see poi.js
   activeRouteId: null,     // route currently receiving clicked points/bends
-  mode: null,              // null | 'point' | 'bend'  (what a map click currently does)
+  mode: null,              // null | 'point'  (when 'point', a map click adds a fixation point)
   editingPointId: null,    // {routeId, pointId} while the modal is editing an existing point
   showLabels: false,       // global toggle: permanent date/time/tag labels under points
   showMarkerLabels: false, // global toggle: permanent name labels under POI markers

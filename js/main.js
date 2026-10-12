@@ -7,8 +7,9 @@
         (GitHub Pages or similar — this fetch is blocked by the browser on a
         plain file:// page), try routes.json sitting next to the page.
      3. Otherwise start empty.
-   Then render the POI layer and the sidebar/legend. Load this file last —
-   it assumes every other module is already in place.
+   Then render the POI layer and the sidebar/legend, and start the undo
+   history from that loaded state (so Ctrl+Z can never "undo the loading").
+   Load this file last — it assumes every other module is already in place.
    ============================================================================= */
 
 (function(){
@@ -17,8 +18,9 @@
   App.poi.renderAll(); // draws nothing yet, but wires things up before any data arrives
 
   App.storage.loadAutosave().then(loadedFromAutosave => {
-    if(loadedFromAutosave) return; // applySnapshot() already rendered everything
+    if(loadedFromAutosave){ App.history.reset(); return; } // applySnapshot() already rendered everything
 
+    const finish = () => { App.sidebar.render(); App.history.reset(); };
     if(location.protocol !== 'file:'){
       fetch('routes.json').then(r => r.ok ? r.json() : null).then(data => {
         if(data && Array.isArray(data.routes)){
@@ -27,10 +29,9 @@
           App.map.renderAll();
           App.poi.renderAll();
         }
-        App.sidebar.render();
-      }).catch(() => App.sidebar.render());
+      }).catch(() => {}).then(finish);
     } else {
-      App.sidebar.render();
+      finish();
     }
   });
 })();

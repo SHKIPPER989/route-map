@@ -1,7 +1,7 @@
 /* =============================================================================
    point-modal.js
    The "Нова точка фіксації" / "Редагувати точку" modal: starting and
-   stopping the map-click "add point" / "add bend" modes, opening the modal
+   stopping the map-click "add point" mode, opening the modal
    for a new point or to edit an existing one, clipboard-paste helpers for
    coordinates and photos, and saving (create or update).
    ============================================================================= */
@@ -33,8 +33,8 @@ App.pointModal = {};
 
   let pendingPhotoData = null; // base64 data: URI captured via paste/file, or null
 
-  // ---- add / bend map-click modes ---------------------------------------------
-  // Adding points/bends to a route that's currently hidden would look like
+  // ---- add-point map-click mode ------------------------------------------------
+  // Adding points to a route that's currently hidden would look like
   // "nothing happens", so switch it back on first.
   function ensureVisible(r){
     if(!r.visible){ r.visible = true; App.map.renderRoute(r); }
@@ -46,19 +46,10 @@ App.pointModal = {};
     state.mode = 'point';
     const r = state.routes.find(r => r.id === routeId);
     ensureVisible(r);
-    addModeText.textContent = `Клікніть на карті, щоб додати точку до «${r.name}» (або ⌨ у списку — ввести координати)`;
-    addModeBar.style.display = 'flex';
-    App.map.instance.getContainer().style.cursor = 'crosshair';
-    App.sidebar.render();
-  }
-
-  function startBendMode(routeId){
-    App.poi.cancelPlacing();
-    state.activeRouteId = routeId;
-    state.mode = 'bend';
-    const r = state.routes.find(r => r.id === routeId);
-    ensureVisible(r);
-    addModeText.textContent = `Клікніть на карті біля потрібного відрізка «${r.name}», щоб додати коліно`;
+    // While this mode is on, a click on the route line adds a POINT; bends are added
+    // by clicking the line when the mode is off — hence the reminder once a line exists.
+    addModeText.textContent = `Клікніть на карті, щоб додати точку до «${r.name}» (або ⌨ у списку — ввести координати)` +
+      (r.points.length >= 2 ? '. Щоб ставити коліна кліком по лінії — натисніть «Готово»' : '');
     addModeBar.style.display = 'flex';
     App.map.instance.getContainer().style.cursor = 'crosshair';
     App.sidebar.render();
@@ -232,5 +223,5 @@ App.pointModal = {};
     App.sidebar.render();
   });
 
-  App.pointModal = { startAddMode, startBendMode, stopMode, openForAdd, openForEdit };
+  App.pointModal = { startAddMode, stopMode, openForAdd, openForEdit };
 })();

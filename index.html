@@ -35,6 +35,8 @@
     <div id="sidebarContent">
       <div id="sidebarHeader">
         <h1>🗺️ Карта маршрутів</h1>
+        <button class="icon-btn" id="undoBtn" title="Скасувати (Ctrl+Z)" disabled>↶</button>
+        <button class="icon-btn" id="redoBtn" title="Повторити (Ctrl+Y)" disabled>↷</button>
         <button class="icon-btn" id="collapseBtn" title="Згорнути панель">⮘</button>
       </div>
 
@@ -72,6 +74,10 @@
             <button class="ghost" id="showAllBtn">☑ Показати всі</button>
             <button class="ghost" id="hideAllBtn">☐ Сховати всі</button>
           </div>
+          <p class="hint" style="margin-top:8px;">
+            <b>Коліно</b> (для кривих вулиць): клікніть по лінії маршруту — з'явиться точка вигину, її можна перетягнути мишею.
+            Видалити — клік по коліну → «видалити». Якщо ввімкнений режим додавання точок — спершу натисніть «Готово».
+          </p>
         </div>
         <ul id="routeList"></ul>
         <div class="empty" id="emptyMsg">Ще немає маршрутів. Створіть маршрут вище, тоді натисніть «➕» або «⌨» у списку.</div>
@@ -144,6 +150,9 @@
         <div class="row" style="margin-top:8px;">
           <button id="csvExportBtn">📊 CSV для Excel</button>
           <button id="printBtn">🖨 Друк / PDF</button>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="wordReportBtn" style="width:100%;">📝 Звіт у Word (карта + таблиці + фото)</button>
         </div>
         <p class="hint" style="margin-top:10px;">
           Файл <code>routes.json</code> зберігає всі маршрути, точки й мітки. Перенесіть його разом із цими файлами на інший комп'ютер і натисніть «Завантажити JSON», щоб продовжити роботу.
@@ -298,7 +307,9 @@
 <script src="js/bulk-import.js"></script>
 <script src="js/legend.js"></script>
 <script src="js/storage.js"></script>
+<script src="js/history.js"></script>
 <script src="js/export.js"></script>
+<script src="js/report.js"></script>
 <script src="js/main.js"></script>
 
 <!-- ====================== LOAD SELF-CHECK ============================
@@ -319,7 +330,9 @@
     'js/bulk-import.js': function(){ return window.App && App.bulkImport; },
     'js/legend.js':      function(){ return window.App && App.legend && App.legend.render; },
     'js/storage.js':     function(){ return window.App && App.storage && App.storage.autosave; },
-    'js/export.js':      function(){ return window.App && App.exportImport && App.exportImport.downloadBlob; }
+    'js/history.js':     function(){ return window.App && App.history && App.history.undo; },
+    'js/export.js':      function(){ return window.App && App.exportImport && App.exportImport.downloadBlob; },
+    'js/report.js':      function(){ return window.App && App.report && App.report.run; }
   };
   var bad = [];
   Object.keys(modules).forEach(function(f){ var ok = false; try { ok = !!modules[f](); } catch(e) {} if(!ok) bad.push(f); });

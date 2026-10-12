@@ -2,8 +2,8 @@
    map.js
    Everything Leaflet-related: base map/tile setup, marker clustering,
    drawing a route (point markers + polyline + direction arrows + "bend"
-   waypoints), the geometry used to drop a bend onto the nearest piece of the
-   drawn line, draggable points/bends, and the permanent on-map point labels.
+   waypoints), the geometry used to drop a bend onto the line where it was
+   clicked, draggable points/bends, and the permanent on-map point labels.
    Standalone POI markers (Будинок/Авто/... ) are a separate layer — see poi.js.
    Photo cards shown next to points are built by photo-cards.js.
    ============================================================================= */
@@ -88,21 +88,23 @@ App.map = {}; // filled in at the bottom of this IIFE
   }
 
   // ---- "bend" (коліно) geometry ------------------------------------------------
-  // Distance (in screen pixels) from point p to the segment v-w.
+  // Distance (in screen pixels) from point p to the segment v-w, plus the
+  // closest point on that segment.
   function distToSegment(p, v, w){
     const dx = w.x - v.x, dy = w.y - v.y;
     const l2 = dx * dx + dy * dy;
     let t = l2 === 0 ? 0 : ((p.x - v.x) * dx + (p.y - v.y) * dy) / l2;
     t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p.x - (v.x + t * dx), p.y - (v.y + t * dy));
+    const x = v.x + t * dx, y = v.y + t * dy;
+    return { dist: Math.hypot(p.x - x, p.y - y), x, y };
   }
 
   // Finds the piece of the *drawn* line (points AND already-placed bends)
-  // that is closest to the click, and returns the node it starts at. Using
-  // the real line — not the straight chord between two fixation points — is
-  // what keeps curved / hairpin streets in the right order when several
-  // bends are added. Ties go to the earlier segment (the epsilon avoids
-  // floating-point noise deciding it).
+  // that is closest to the click, and returns the node it starts at plus the
+  // closest spot on it. Using the real line — not the straight chord between
+  // two fixation points — is what keeps curved / hairpin streets in the right
+  // order when several bends are added. Ties go to the earlier segment (the
+  // epsilon keeps floating-point noise from deciding it).
   function nearestPathSegment(route, latlng){
     const nodes = utils.buildNodes(route);
     if(nodes.length < 2) return null;
@@ -112,31 +114,32 @@ App.map = {}; // filled in at the bottom of this IIFE
       const d = distToSegment(clickPx,
         map.latLngToLayerPoint([nodes[i].lat, nodes[i].lng]),
         map.latLngToLayerPoint([nodes[i + 1].lat, nodes[i + 1].lng]));
-      if(!best || d < best.dist - 1e-6) best = { dist: d, prev: nodes[i] };
+      if(!best || d.dist < best.dist - 1e-6) best = { dist: d.dist, prev: nodes[i], x: d.x, y: d.y };
     }
     return best;
   }
 
-  // Adds a bend to whichever route is in "bend" mode. Works for any route
-  // with 2+ points, new or old (see the 📐 button in sidebar.js). The bend is
-  // spliced into route.bends right after the node it follows, so array order
-  // always equals drawing order.
-  function addBendAtLatLng(latlng){
-    const r = state.routes.find(r => r.id === state.activeRouteId);
-    if(!r) return;
-    const seg = nearestPathSegment(r, latlng);
-    if(!seg) return; // shouldn't happen — the "add bend" button is disabled below 2 points
-    r.bends = r.bends || [];
+  // Adds a bend where the user clicked ON the route line (see the invisible
+  // "hit line" in renderRoute — no special mode needed). The bend is snapped
+  // onto the line itself, so adding it doesn't change the route's shape; the
+  // user then drags it to bend the line, like vertices in Google My Maps.
+  // It is spliced into route.bends right after the node it follows, so array
+  // order always equals drawing order.
+  function addBend(route, latlng){
+    const seg = nearestPathSegment(route, latlng);
+    if(!seg) return;
+    const at = map.layerPointToLatLng(L.point(seg.x, seg.y));
+    route.bends = route.bends || [];
     const prev = seg.prev;
-    const bend = { id: utils.uid('b'), lat: latlng.lat, lng: latlng.lng, afterPointId: prev.anchorId };
-    let at;
-    if(prev.kind === 'bend') at = r.bends.findIndex(b => b.id === prev.id) + 1;      // right after the previous bend
+    const bend = { id: utils.uid('b'), lat: at.lat, lng: at.lng, afterPointId: prev.anchorId };
+    let idx;
+    if(prev.kind === 'bend') idx = route.bends.findIndex(b => b.id === prev.id) + 1;   // right after the previous bend
     else {                                                                              // right after the point itself,
-      at = r.bends.findIndex(b => b.afterPointId === prev.id);                          // i.e. before its other bends
-      if(at === -1) at = r.bends.length;
+      idx = route.bends.findIndex(b => b.afterPointId === prev.id);                     // i.e. before its other bends
+      if(idx === -1) idx = route.bends.length;
     }
-    r.bends.splice(at, 0, bend);
-    renderRoute(r);
+    route.bends.splice(idx, 0, bend);
+    renderRoute(route);
     App.sidebar.render();
   }
 
@@ -203,9 +206,22 @@ App.map = {}; // filled in at the bottom of this IIFE
       group.addLayer(L.polylineDecorator(line, {
         patterns: [{
           offset: '5%', repeat: '80px',
-          symbol: L.Symbol.arrowHead({ pixelSize: 10, polygon: false, pathOptions: { stroke: true, color: route.color, weight: 2 } })
+          symbol: L.Symbol.arrowHead({ pixelSize: 10, polygon: false, pathOptions: { stroke: true, color: route.color, weight: 2, interactive: false } })
         }]
       }));
+
+      // Invisible, much wider twin of the line: a generous click target so the
+      // thin line is easy to hit. A click on it adds a bend. While "add point"
+      // or "place marker" is active, clicks keep their normal meaning instead
+      // (let them through to the map).
+      // (opacity 0.01, not 0: invisible, but still counts as "painted" for SVG click hit-testing)
+      const hit = L.polyline(latlngs, { weight: 16, opacity: 0.01, className: 'route-hit-line' });
+      hit.on('click', e => {
+        if(state.mode === 'point' || state.poiPlacing) return;
+        L.DomEvent.stopPropagation(e);
+        addBend(route, e.latlng);
+      });
+      group.addLayer(hit);
     }
 
     group.addTo(map);
@@ -219,7 +235,14 @@ App.map = {}; // filled in at the bottom of this IIFE
     if(markersByRoute[routeId]){ clusterGroup.removeLayers(markersByRoute[routeId]); delete markersByRoute[routeId]; }
   }
 
-  function renderAll(){ state.routes.forEach(renderRoute); }
+  // Redraws every route. First removes the layers of routes that are no longer
+  // in the data (after undo, a JSON import or loading a plan) — otherwise the old
+  // routes would stay on the map as ghosts.
+  function renderAll(){
+    const alive = new Set(state.routes.map(r => r.id));
+    Object.keys(layerByRoute).concat(Object.keys(markersByRoute)).forEach(id => { if(!alive.has(id)) clearRoute(id); });
+    state.routes.forEach(renderRoute);
+  }
 
   // Re-draws every visible route's layers without changing any data — used
   // when a "show labels" / "show photos" checkbox is toggled.
@@ -255,14 +278,12 @@ App.map = {}; // filled in at the bottom of this IIFE
     }));
   });
 
-  // Map clicks only do something while an "add point" or "add bend" mode is
-  // active (started from the sidebar — see point-modal.js), or while placing
-  // a new POI marker (see poi.js).
+  // Map clicks only do something while an "add point" mode is active (started
+  // from the sidebar — see point-modal.js), or while placing a new POI marker
+  // (see poi.js). Bends are added by clicking the route line itself (renderRoute).
   map.on('click', e => {
     if(state.poiPlacing){ App.poi.placeAt(e.latlng); return; }
-    if(!state.activeRouteId) return;
-    if(state.mode === 'point') App.pointModal.openForAdd(e.latlng);
-    else if(state.mode === 'bend') addBendAtLatLng(e.latlng);
+    if(state.activeRouteId && state.mode === 'point') App.pointModal.openForAdd(e.latlng);
   });
 
   App.map = { instance: map, renderRoute, renderAll, rerenderVisual, clearRoute, deleteBend };

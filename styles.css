@@ -50,7 +50,9 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--text);}
 #sidebarRail button:hover{border-color:var(--accent);}
 #sidebarHeader{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
 #sidebarHeader h1{border:none;padding:14px 8px 14px 16px;flex:1;}
-#sidebarHeader .icon-btn{font-size:16px;padding:4px 14px 4px 4px;}
+#sidebarHeader .icon-btn{font-size:16px;padding:4px 6px;}
+#sidebarHeader .icon-btn:last-child{padding-right:14px;}
+#sidebarHeader .icon-btn:disabled{opacity:.3;cursor:default;}
 
 /* ---- generic form controls ------------------------------------------------ */
 .pad{padding:14px 16px;}
@@ -181,6 +183,8 @@ button:disabled:hover{border-color:var(--border);}
   width:22px;height:22px;border-radius:50%;border:2px solid #fff;
   font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,.5);
 }
+/* Invisible wide click target over each route line (adds a bend on click) */
+.route-hit-line{cursor:crosshair;}
 /* "Bend" (коліно) waypoint — a small plain draggable dot */
 .bend-dot{
   width:12px;height:12px;border-radius:50%;border:2px solid #fff;

@@ -106,7 +106,6 @@ App.sidebar = {};
       li.className = 'route-item';
 
       const bendCount = (route.bends || []).length;
-      const bendDisabled = route.points.length < 2;
 
       const head = document.createElement('div');
       head.className = 'route-head';
@@ -119,7 +118,6 @@ App.sidebar = {};
         <span class="route-count">${route.points.length}т.${bendCount ? ' · ' + bendCount + 'к.' : ''}</span>
         <button class="icon-btn" data-add="${route.id}" title="Додати точку кліком по карті">➕</button>
         <button class="icon-btn" data-coord="${route.id}" title="Додати точку за координатами">⌨</button>
-        <button class="icon-btn" data-bend="${route.id}" title="Додати коліно (потрібно мінімум 2 точки)" ${bendDisabled ? 'disabled' : ''}>📐</button>
         <button class="icon-btn" data-del-route="${route.id}" title="Видалити маршрут">🗑</button>
       `;
       li.appendChild(head);
@@ -169,7 +167,6 @@ App.sidebar = {};
     const toggle        = e.target.closest('[data-toggle]');
     const addBtn        = e.target.closest('[data-add]');
     const coordBtn       = e.target.closest('[data-coord]');
-    const bendBtn        = e.target.closest('[data-bend]');
     const delRoute       = e.target.closest('[data-del-route]');
     const delPointRow    = e.target.closest('[data-del-point-row]');
     const editPointRow   = e.target.closest('[data-edit-point-row]');
@@ -180,6 +177,8 @@ App.sidebar = {};
       const r = state.routes.find(r => r.id === vis.getAttribute('data-vis'));
       r.visible = vis.checked;
       App.map.renderRoute(r);
+      App.legend.render();
+      App.storage.autosave();
     }
     if(toggle){
       const r = state.routes.find(r => r.id === toggle.getAttribute('data-toggle'));
@@ -191,7 +190,6 @@ App.sidebar = {};
       App.pointModal.startAddMode(coordBtn.getAttribute('data-coord'));
       App.pointModal.openForAdd(null); // null => manual coordinate entry, no map click needed
     }
-    if(bendBtn && !bendBtn.disabled) App.pointModal.startBendMode(bendBtn.getAttribute('data-bend'));
     if(delRoute && confirm('Видалити маршрут разом з усіма точками?')) deleteRoute(delRoute.getAttribute('data-del-route'));
     if(delPointRow){
       const [routeId, pointId] = delPointRow.getAttribute('data-del-point-row').split('|');
@@ -218,7 +216,7 @@ App.sidebar = {};
     const colorInput = e.target.closest('[data-route-color]');
     if(colorInput){
       const r = state.routes.find(r => r.id === colorInput.getAttribute('data-route-color'));
-      if(r){ r.color = colorInput.value; App.map.renderRoute(r); }
+      if(r){ r.color = colorInput.value; App.map.renderRoute(r); App.legend.render(); App.storage.autosave(); }
     }
   });
 

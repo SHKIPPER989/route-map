@@ -97,6 +97,7 @@ App.storage = {};
   // ---- autosave --------------------------------------------------------------
   let autosaveTimer = null;
   function autosave(){
+    if(App.history) App.history.commit(); // every change signal is also an undo-history checkpoint (history.js)
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => {
       putRecord({ name: AUTOSAVE_NAME, ...snapshot() }).catch(() => {}); // best-effort — storage can be unavailable (e.g. private mode)
