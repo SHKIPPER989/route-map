@@ -2,8 +2,8 @@
    map.js
    Everything Leaflet-related: base map/tile setup, marker clustering,
    drawing a route (point markers + polyline + direction arrows + "bend"
-   waypoints), the geometry used to drop a bend onto the line where it was
-   clicked, draggable points/bends, and the permanent on-map point labels.
+   waypoints), the geometry used to drop a bend / a new point onto the line where
+   it was clicked (left-click = bend, right-click = menu), draggable points/bends, and the permanent on-map point labels.
    Standalone POI markers (Будинок/Авто/... ) are a separate layer — see poi.js.
    Photo cards shown next to points are built by photo-cards.js.
    ============================================================================= */
@@ -114,7 +114,7 @@ App.map = {}; // filled in at the bottom of this IIFE
       const d = distToSegment(clickPx,
         map.latLngToLayerPoint([nodes[i].lat, nodes[i].lng]),
         map.latLngToLayerPoint([nodes[i + 1].lat, nodes[i + 1].lng]));
-      if(!best || d.dist < best.dist - 1e-6) best = { dist: d.dist, prev: nodes[i], x: d.x, y: d.y };
+      if(!best || d.dist < best.dist - 1e-6) best = { dist: d.dist, prev: nodes[i], index: i, nodes, x: d.x, y: d.y };
     }
     return best;
   }
@@ -141,6 +141,47 @@ App.map = {}; // filled in at the bottom of this IIFE
     route.bends.splice(idx, 0, bend);
     renderRoute(route);
     App.sidebar.render();
+  }
+
+  // "Додати точку тут" (right-click menu): opens the new-point dialog for THIS route at the
+  // spot on the line that was clicked (snapped onto it), with the time pre-filled: it is
+  // worked out from how far along the line, between the two neighbouring fixation points,
+  // the click is — halfway between 10:00 and 10:10 gives 10:05. The user can still edit it.
+  function addPointHere(route, latlng){
+    const seg = nearestPathSegment(route, latlng);
+    if(!seg) return;
+    const { nodes, index: i } = seg;
+    const at = map.layerPointToLatLng(L.point(seg.x, seg.y));
+    const px = n => map.latLngToLayerPoint([n.lat, n.lng]);
+    const gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+    let before = i;                                                    // the fixation point the click is past
+    while(before > 0 && nodes[before].kind !== 'point') before--;
+    let next = i + 1;                                                  // the fixation point it is heading to
+    while(next < nodes.length && nodes[next].kind !== 'point') next++;
+    const prevPoint = route.points.find(p => p.id === nodes[before].id);
+    const nextPoint = next < nodes.length ? route.points.find(p => p.id === nodes[next].id) : null;
+
+    // Line length from the previous point to the click (a), and from the click to the next point (b).
+    const spot = { x: seg.x, y: seg.y };
+    let a = gap(px(nodes[i]), spot), b = gap(spot, px(nodes[i + 1]));
+    for(let k = before; k < i; k++) a += gap(px(nodes[k]), px(nodes[k + 1]));
+    for(let k = i + 1; k < Math.min(next, nodes.length - 1); k++) b += gap(px(nodes[k]), px(nodes[k + 1]));
+    const fraction = (a + b) > 0 ? a / (a + b) : 0.5;
+
+    const t0 = Date.parse(`${prevPoint.date}T${prevPoint.time}`);
+    const t1 = nextPoint ? Date.parse(`${nextPoint.date}T${nextPoint.time}`) : t0;
+    let date = prevPoint.date, time = prevPoint.time;
+    if(isFinite(t0) && isFinite(t1)){
+      const d = new Date(Math.round((t0 + fraction * (t1 - t0)) / 60000) * 60000);   // whole minutes
+      const p2 = v => String(v).padStart(2, '0');
+      date = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+      time = `${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    }
+    App.pointModal.openForAdd(at, {
+      routeId: route.id, date, time,
+      after: { pointId: prevPoint.id, bendId: seg.prev.kind === 'bend' ? seg.prev.id : null }
+    });
   }
 
   function deleteBend(routeId, bendId){
@@ -220,6 +261,17 @@ App.map = {}; // filled in at the bottom of this IIFE
         if(state.mode === 'point' || state.poiPlacing) return;
         L.DomEvent.stopPropagation(e);
         addBend(route, e.latlng);
+      });
+      // Right-click on the line: menu for this route (add a point / a bend here, reverse direction).
+      hit.on('contextmenu', e => {
+        L.DomEvent.stopPropagation(e);               // keep it from reaching the map, which would close the menu again
+        const ev = e.originalEvent || {};
+        if(ev.preventDefault) ev.preventDefault();    // no browser menu on top of ours
+        App.contextMenu.open(ev.clientX || 0, ev.clientY || 0, [
+          { icon: '📍', label: 'Додати точку тут',  action: () => addPointHere(route, e.latlng) },
+          { icon: '📐', label: 'Додати коліно',      action: () => addBend(route, e.latlng) },
+          { icon: '⇄',  label: 'Реверс напрямку',    action: () => App.sidebar.reverseRoute(route.id) }
+        ], { title: route.name, color: route.color });
       });
       group.addLayer(hit);
     }

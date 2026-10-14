@@ -76,7 +76,8 @@
           </div>
           <p class="hint" style="margin-top:8px;">
             <b>Коліно</b> (для кривих вулиць): клікніть по лінії маршруту — з'явиться точка вигину, її можна перетягнути мишею.
-            Видалити — клік по коліну → «видалити». Якщо ввімкнений режим додавання точок — спершу натисніть «Готово».
+            Видалити — клік по коліну → «видалити». Якщо ввімкнений режим додавання точок — спершу натисніть «Готово».<br>
+            <b>Права кнопка миші по лінії:</b> додати точку тут (час підставиться між сусідніми точками), додати коліно, реверс напрямку.
           </p>
         </div>
         <ul id="routeList"></ul>
@@ -301,6 +302,7 @@
 <script src="js/state.js"></script>
 <script src="js/map.js"></script>
 <script src="js/photo-cards.js"></script>
+<script src="js/context-menu.js"></script>
 <script src="js/poi.js"></script>
 <script src="js/sidebar.js"></script>
 <script src="js/point-modal.js"></script>
@@ -324,6 +326,7 @@
     'js/state.js':       function(){ return window.App && App.state && App.utils; },
     'js/map.js':         function(){ return window.App && App.map && App.map.instance && App.map.renderRoute; },
     'js/photo-cards.js': function(){ return window.App && App.photoCards && App.photoCards.html; },
+    'js/context-menu.js': function(){ return window.App && App.contextMenu && App.contextMenu.open; },
     'js/poi.js':         function(){ return window.App && App.poi && App.poi.renderAll; },
     'js/sidebar.js':     function(){ return window.App && App.sidebar && App.sidebar.render; },
     'js/point-modal.js': function(){ return window.App && App.pointModal && App.pointModal.openForAdd; },

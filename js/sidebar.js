@@ -96,6 +96,42 @@ App.sidebar = {};
     render();
   }
 
+  // "Реверс напрямку" (route-line right-click menu). In this app the direction of travel IS
+  // the time order of the points, so reversing means mirroring the timeline: the first
+  // point gets the last point's date/time, the second gets the second-to-last, and so on —
+  // the route then runs the other way and the arrows flip. (Photos, notes, sources and
+  // positions stay with their points.) Bends follow along: each stretch of bends moves to
+  // the point that now precedes it, in reverse order. Bends that hang off the very last
+  // point lead nowhere once reversed and are dropped. Asks first, because it rewrites times;
+  // Ctrl+Z undoes it.
+  function reverseRoute(routeId){
+    const r = state.routes.find(r => r.id === routeId);
+    if(!r || r.points.length < 2) return;
+    if(!confirm(`Змінити напрямок маршруту «${r.name}» на протилежний?\n\n` +
+                `Дати й час точок буде переставлено у зворотному порядку (перша точка отримає час останньої тощо). ` +
+                `Це можна скасувати через Ctrl+Z.`)) return;
+
+    const pts = utils.sortedPoints(r);                          // old order, same point objects as in r.points
+    const stamps = pts.map(p => ({ date: p.date, time: p.time }));
+    pts.forEach((p, i) => { const t = stamps[pts.length - 1 - i]; p.date = t.date; p.time = t.time; });
+    r.points = pts.slice().reverse();                           // new order (also decides ties between equal times)
+
+    const slot = new Map(pts.map((p, i) => [p.id, i]));
+    const moved = [];
+    const groups = new Map();                                   // old anchor index -> its bends, in old order
+    (r.bends || []).forEach(b => {
+      const i = slot.get(b.afterPointId);
+      if(i === undefined || i >= pts.length - 1) return;        // orphaned or after the last point: dropped
+      if(!groups.has(i)) groups.set(i, []);
+      groups.get(i).push(b);
+    });
+    groups.forEach((list, i) => list.slice().reverse().forEach(b => moved.push(Object.assign({}, b, { afterPointId: pts[i + 1].id }))));
+    r.bends = moved;
+
+    App.map.renderRoute(r);
+    render();
+  }
+
   // ---- list rendering -----------------------------------------------------------
   function render(){
     routeListEl.innerHTML = '';
@@ -220,5 +256,5 @@ App.sidebar = {};
     }
   });
 
-  App.sidebar = { render, deletePoint, deleteRoute };
+  App.sidebar = { render, deletePoint, deleteRoute, reverseRoute };
 })();

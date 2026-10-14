@@ -151,12 +151,20 @@ App.pointModal = {};
   ptPhotoClearBtn.addEventListener('click', () => setPhotoPreview(null));
 
   // ---- open / close -----------------------------------------------------------
-  function openForAdd(latlng){
+  // Which route a NEW point goes to, and where it is placed, when that isn't simply
+  // "the route in add-point mode" — set by the route line's right-click menu:
+  //   {routeId, after: {pointId, bendId}}  (after = the line node the click was just past)
+  let pending = null;
+
+  // opts (optional): {routeId, date, time, after} — see `pending` above; date/time pre-fill the fields.
+  function openForAdd(latlng, opts){
     state.editingPointId = null;
-    modalTitle.textContent = 'Нова точка фіксації';
+    pending = (opts && opts.routeId) ? { routeId: opts.routeId, after: opts.after || null } : null;
+    const target = state.routes.find(r => r.id === (pending ? pending.routeId : state.activeRouteId));
+    modalTitle.textContent = 'Нова точка фіксації' + (target ? ` — «${target.name}»` : '');
     const now = new Date();
-    ptDate.value = now.toISOString().slice(0, 10);
-    ptTime.value = now.toTimeString().slice(0, 5);
+    ptDate.value = (opts && opts.date) || now.toISOString().slice(0, 10);
+    ptTime.value = (opts && opts.time) || now.toTimeString().slice(0, 5);
     ptSourceType.value = 'other';
     ptNote.value = '';
     ptPhotoUrl.value = '';
@@ -186,12 +194,13 @@ App.pointModal = {};
 
   function close(){
     state.editingPointId = null;
+    pending = null;
     overlay.style.display = 'none';
   }
   document.getElementById('ptCancel').addEventListener('click', close);
 
   document.getElementById('ptSave').addEventListener('click', () => {
-    const routeId = state.editingPointId ? state.editingPointId.routeId : state.activeRouteId;
+    const routeId = state.editingPointId ? state.editingPointId.routeId : (pending ? pending.routeId : state.activeRouteId);
     if(!routeId) return close();
 
     const latVal = parseFloat(ptLat.value);
@@ -211,11 +220,28 @@ App.pointModal = {};
         sourceType: ptSourceType.value, note: ptNote.value.trim(), photo
       });
     } else {
-      r.points.push({
+      const fresh = {
         id: utils.uid('p'), lat: latVal, lng: lngVal,
         date: ptDate.value, time: ptTime.value || '00:00',
         sourceType: ptSourceType.value, note: ptNote.value.trim(), photo
-      });
+      };
+      const after = pending && pending.after;
+      if(after){
+        // Placed on the line (right-click menu): insert right behind the point it follows, so
+        // that even with identical times it sorts between its neighbours, then split the
+        // bend chain at the click: the bends beyond it now hang off the new point.
+        const at = r.points.findIndex(p => p.id === after.pointId);
+        r.points.splice(at < 0 ? r.points.length : at + 1, 0, fresh);
+        const sorted = utils.sortedPoints(r);
+        const prevIdx = sorted.findIndex(p => p.id === after.pointId);
+        if(prevIdx >= 0 && sorted[prevIdx + 1] && sorted[prevIdx + 1].id === fresh.id){   // still right after it (time not edited away)
+          const chain = (r.bends || []).filter(b => b.afterPointId === after.pointId);
+          const from = after.bendId ? chain.findIndex(b => b.id === after.bendId) + 1 : 0;
+          if(!after.bendId || from > 0) chain.slice(from).forEach(b => { b.afterPointId = fresh.id; });
+        }
+      } else {
+        r.points.push(fresh);
+      }
     }
 
     close();
