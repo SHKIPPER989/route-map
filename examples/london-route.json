@@ -1,0 +1,165 @@
+{
+  "exportedAt": "2026-10-15T12:00:00.000Z",
+  "routes": [
+    {
+      "id": "r-courier",
+      "name": "Кур'єр",
+      "type": "pedestrian",
+      "color": "#e63946",
+      "tags": [
+        "Свідок",
+        "Кур'єр"
+      ],
+      "visible": true,
+      "points": [
+        {
+          "id": "p1",
+          "lat": 51.508,
+          "lng": -0.1281,
+          "date": "2026-10-08",
+          "time": "10:00",
+          "sourceType": "camera",
+          "note": "Трафальгарська площа",
+          "photo": null
+        },
+        {
+          "id": "p2",
+          "lat": 51.5034,
+          "lng": -0.1268,
+          "date": "2026-10-08",
+          "time": "10:07",
+          "sourceType": "dashcam",
+          "note": "Даунінг-стріт",
+          "photo": "data:image/jpeg;base64,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",
+          "photoCard": {
+            "dx": -168,
+            "dy": 30,
+            "w": 138
+          }
+        },
+        {
+          "id": "p3",
+          "lat": 51.5007,
+          "lng": -0.1246,
+          "date": "2026-10-08",
+          "time": "10:14",
+          "sourceType": "camera",
+          "note": "Біг-Бен",
+          "photo": null
+        },
+        {
+          "id": "p4",
+          "lat": 51.501,
+          "lng": -0.1218,
+          "date": "2026-10-08",
+          "time": "10:19",
+          "sourceType": "other",
+          "note": "Вестмінстерський міст",
+          "photo": null
+        },
+        {
+          "id": "p5",
+          "lat": 51.5033,
+          "lng": -0.1196,
+          "date": "2026-10-08",
+          "time": "10:26",
+          "sourceType": "camera",
+          "note": "Лондонське Око",
+          "photo": null
+        }
+      ],
+      "bends": [
+        {
+          "id": "b1",
+          "lat": 51.5012,
+          "lng": -0.1261,
+          "afterPointId": "p2"
+        },
+        {
+          "id": "b2",
+          "lat": 51.5013,
+          "lng": -0.1197,
+          "afterPointId": "p4"
+        }
+      ]
+    },
+    {
+      "id": "r-taxi",
+      "name": "Таксі",
+      "type": "vehicle",
+      "color": "#2a9d8f",
+      "tags": [
+        "Водій"
+      ],
+      "visible": true,
+      "points": [
+        {
+          "id": "t1",
+          "lat": 51.5013,
+          "lng": -0.1236,
+          "date": "2026-10-08",
+          "time": "10:03",
+          "sourceType": "dashcam",
+          "note": "Вестмінстер, набережна",
+          "photo": null
+        },
+        {
+          "id": "t2",
+          "lat": 51.5043,
+          "lng": -0.1228,
+          "date": "2026-10-08",
+          "time": "10:08",
+          "sourceType": "camera",
+          "note": "Whitehall Gardens",
+          "photo": null
+        },
+        {
+          "id": "t3",
+          "lat": 51.5074,
+          "lng": -0.1222,
+          "date": "2026-10-08",
+          "time": "10:12",
+          "sourceType": "camera",
+          "note": "станція Embankment",
+          "photo": null
+        },
+        {
+          "id": "t4",
+          "lat": 51.5085,
+          "lng": -0.1204,
+          "date": "2026-10-08",
+          "time": "10:15",
+          "sourceType": "dashcam",
+          "note": "Голка Клеопатри",
+          "photo": null
+        }
+      ],
+      "bends": [
+        {
+          "id": "b3",
+          "lat": 51.5081,
+          "lng": -0.1214,
+          "afterPointId": "t3"
+        }
+      ]
+    }
+  ],
+  "markers": [
+    {
+      "id": "m1",
+      "icon": "camera",
+      "label": "CCTV: Парламентська пл.",
+      "lat": 51.5017,
+      "lng": -0.1257,
+      "note": "Камера спостереження біля Парламентської площі"
+    },
+    {
+      "id": "m2",
+      "icon": "flag",
+      "label": "Точка збору",
+      "lat": 51.5061,
+      "lng": -0.1296,
+      "note": ""
+    }
+  ]
+}
