@@ -116,19 +116,33 @@ App.sidebar = {};
     pts.forEach((p, i) => { const t = stamps[pts.length - 1 - i]; p.date = t.date; p.time = t.time; });
     r.points = pts.slice().reverse();                           // new order (also decides ties between equal times)
 
-    const slot = new Map(pts.map((p, i) => [p.id, i]));
-    const moved = [];
-    const groups = new Map();                                   // old anchor index -> its bends, in old order
-    (r.bends || []).forEach(b => {
-      const i = slot.get(b.afterPointId);
-      if(i === undefined || i >= pts.length - 1) return;        // orphaned or after the last point: dropped
-      if(!groups.has(i)) groups.set(i, []);
-      groups.get(i).push(b);
-    });
-    groups.forEach((list, i) => list.slice().reverse().forEach(b => moved.push(Object.assign({}, b, { afterPointId: pts[i + 1].id }))));
-    r.bends = moved;
+    r.bends = utils.reverseBends(pts, r.bends);                 // each stretch of bends moves to the point that now precedes it
 
     App.map.renderRoute(r);
+    render();
+  }
+
+  // How much data there is — used by the map's right-click menu and the "clear" confirmation.
+  function dataSummary(){
+    const points = state.routes.reduce((n, r) => n + r.points.length, 0);
+    const bends = state.routes.reduce((n, r) => n + (r.bends || []).length, 0);
+    return { routes: state.routes.length, points, bends, markers: state.markers.length, empty: !state.routes.length && !state.markers.length };
+  }
+
+  // "Очистити карту" (map right-click menu): removes EVERY route (with its points, bends and
+  // photos) and every standalone marker. Asks first; Ctrl+Z brings it all back. Saved browser
+  // plans are separate and are not touched.
+  function clearAll(){
+    const s = dataSummary();
+    if(s.empty) return;
+    if(!confirm(`Очистити карту?\n\nБуде видалено ВСЕ: маршрутів — ${s.routes} (точок — ${s.points}, колін — ${s.bends}), міток — ${s.markers}.\n\n` +
+                `Збережені плани не зачіпаються, а саму дію можна скасувати через Ctrl+Z.`)) return;
+    App.pointModal.stopMode();
+    App.poi.cancelPlacing();
+    state.routes = [];
+    state.markers = [];
+    App.map.renderAll();   // also removes the layers of the routes that are gone
+    App.poi.renderAll();
     render();
   }
 
@@ -256,5 +270,5 @@ App.sidebar = {};
     }
   });
 
-  App.sidebar = { render, deletePoint, deleteRoute, reverseRoute };
+  App.sidebar = { render, deletePoint, deleteRoute, reverseRoute, dataSummary, clearAll };
 })();

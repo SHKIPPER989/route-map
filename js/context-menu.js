@@ -18,7 +18,8 @@ App.contextMenu = {};
     if(el){ el.remove(); el = null; }
   }
 
-  // items: [{icon, label, action}], opts: {title, color}
+  // items: [{icon, label, action, danger?, disabled?}], opts: {title, color}
+  // danger = shown in red (destructive action); disabled = greyed out and does nothing.
   function open(x, y, items, opts = {}){
     close();
     el = document.createElement('div');
@@ -35,8 +36,9 @@ App.contextMenu = {};
     items.forEach(item => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'ctx-item';
+      b.className = 'ctx-item' + (item.danger ? ' ctx-danger' : '');
       b.setAttribute('role', 'menuitem');
+      if(item.disabled) b.disabled = true;
       b.innerHTML = `<span class="ctx-ico">${item.icon || ''}</span><span>${utils.escapeHtml(item.label)}</span>`;
       b.addEventListener('click', ev => {
         ev.stopPropagation();
@@ -53,7 +55,7 @@ App.contextMenu = {};
     el.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + 'px';
     el.style.top  = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + 'px';
 
-    const first = el.querySelector('.ctx-item');
+    const first = el.querySelector('.ctx-item:not(:disabled)');
     if(first) first.focus();
   }
 

@@ -189,7 +189,8 @@ App.report = {};
       const nodes = nodesByRoute[i];
       if(nodes.length < 2) return;
       tracePath(ctx, nodes); ctx.strokeStyle = '#fff'; ctx.lineWidth = 8; ctx.stroke();
-      tracePath(ctx, nodes); ctx.strokeStyle = r.color; ctx.lineWidth = 4.5; ctx.stroke();
+      tracePath(ctx, nodes); ctx.strokeStyle = r.color; ctx.lineWidth = 4.5;
+      ctx.setLineDash(r.dashed ? [14, 10] : []); ctx.stroke(); ctx.setLineDash([]);   // dashed = a route that repeats another's path
       drawArrows(ctx, nodes, r.color);
     });
     // Bends: small dots.
@@ -307,6 +308,7 @@ App.report = {};
       children: [new ImageRun({ type: 'png', data: data.map.bytes, transformation: { width: imgW, height: Math.round(imgW * data.map.height / data.map.width) } })]
     }));
     children.push(para('Рис. 1 — Схема. Номери на карті відповідають колонці «№» у таблицях нижче; стрілки показують напрямок руху.' +
+      (data.routes.some(r => r.dashed) ? ' Пунктир — маршрут, що повторює шлях іншого (наприклад, дорога назад).' : '') +
       (data.map.tilesLoaded ? ' Підкладка: © учасники OpenStreetMap.' : ' Підкладку карти завантажити не вдалося (немає мережі).'),
       { size: 18, italics: true, color: '555555', p: { spacing: { after: 160 } } }));
     if(data.routes.length){

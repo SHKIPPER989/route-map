@@ -143,6 +143,14 @@ App.map = {}; // filled in at the bottom of this IIFE
     App.sidebar.render();
   }
 
+  // Adding a point/bend from the right-click menu is a one-off action, so it also switches off
+  // any "keep adding" mode that was on (add-point mode, or placing a POI marker) — otherwise
+  // every following click on the map would keep adding more points.
+  function leaveAddModes(){
+    if(state.mode) App.pointModal.stopMode();
+    if(state.poiPlacing) App.poi.cancelPlacing();
+  }
+
   // "Додати точку тут" (right-click menu): opens the new-point dialog for THIS route at the
   // spot on the line that was clicked (snapped onto it), with the time pre-filled: it is
   // worked out from how far along the line, between the two neighbouring fixation points,
@@ -193,18 +201,17 @@ App.map = {}; // filled in at the bottom of this IIFE
   }
 
   // ---- rendering ----------------------------------------------------------------
-  // Fully redraws one route's markers + line + bends from its current data.
-  // Safe to call after any edit (add/delete point, move bend, recolor, etc).
-  function renderRoute(route){
-    clearRoute(route.id);
-    if(!route.visible) return;
-
+  // Builds everything that draws one route — the point markers, and a layer group with the
+  // line, direction arrows, bends and the invisible click line — WITHOUT touching the map.
+  // Returns null for a hidden route.
+  function buildRoute(route){
+    if(!route.visible) return null;
     const pts = utils.sortedPoints(route);
 
-    // Point markers go into the shared cluster group. Draggable: dropping a
-    // marker updates that point's stored coordinates on dragend. Points with a
-    // visible photo card get a z-index boost so the card sits above other markers.
-    const newMarkers = pts.map(p => {
+    // Point markers (they will go into the shared cluster group). Draggable: dropping a
+    // marker updates that point's stored coordinates on dragend. Points with a visible
+    // photo card get a z-index boost so the card sits above other markers.
+    const markers = pts.map(p => {
       const marker = L.marker([p.lat, p.lng], {
         icon: makeDivIcon(route, p), draggable: true,
         zIndexOffset: (App.photoCards && App.photoCards.isShown(p)) ? 1000 : 0
@@ -221,9 +228,6 @@ App.map = {}; // filled in at the bottom of this IIFE
       });
       return marker;
     });
-    clusterGroup.addLayers(newMarkers);
-    markersByRoute[route.id] = newMarkers;
-    if(App.photoCards) App.photoCards.schedule(); // fix leader lines once the new icons are laid out
 
     // Line, direction arrows and bend markers go into this route's own layer group.
     const group = L.layerGroup();
@@ -242,7 +246,7 @@ App.map = {}; // filled in at the bottom of this IIFE
 
     if(pts.length >= 2){
       const latlngs = utils.buildPathLatLngs(route);
-      const line = L.polyline(latlngs, { color: route.color, weight: 3, opacity: 0.85 });
+      const line = L.polyline(latlngs, { color: route.color, weight: 3, opacity: 0.85, dashArray: route.dashed ? '10 8' : null });
       group.addLayer(line);
       group.addLayer(L.polylineDecorator(line, {
         patterns: [{
@@ -268,16 +272,43 @@ App.map = {}; // filled in at the bottom of this IIFE
         const ev = e.originalEvent || {};
         if(ev.preventDefault) ev.preventDefault();    // no browser menu on top of ours
         App.contextMenu.open(ev.clientX || 0, ev.clientY || 0, [
-          { icon: '📍', label: 'Додати точку тут',  action: () => addPointHere(route, e.latlng) },
-          { icon: '📐', label: 'Додати коліно',      action: () => addBend(route, e.latlng) },
-          { icon: '⇄',  label: 'Реверс напрямку',    action: () => App.sidebar.reverseRoute(route.id) }
+          { icon: '📍', label: 'Додати точку тут',  action: () => { leaveAddModes(); addPointHere(route, e.latlng); } },
+          { icon: '📐', label: 'Додати коліно',      action: () => { leaveAddModes(); addBend(route, e.latlng); } },
+          { icon: '⇄',  label: 'Реверс напрямку',    action: () => App.sidebar.reverseRoute(route.id) },
+          { icon: '↩',  label: 'Дорога назад…',      action: () => App.returnTrip.open(route.id) }
         ], { title: route.name, color: route.color });
       });
       group.addLayer(hit);
     }
 
-    group.addTo(map);
-    layerByRoute[route.id] = group;
+    return { markers, group };
+  }
+
+  // Fully redraws one route from its current data. Safe to call after any edit.
+  // The new drawing is built BEFORE the old one is taken off the map, so if building fails
+  // (bad data, a library error) the route simply stays as it was — instead of vanishing —
+  // and the error is shown on the page (see App.utils.reportError).
+  function renderRoute(route){
+    let built;
+    try{
+      built = buildRoute(route);
+    }catch(err){
+      App.utils.reportError(`Не вдалося намалювати маршрут «${route.name}»`, err);
+      return;
+    }
+    const oldMarkers = markersByRoute[route.id];
+    clearRoute(route.id);
+    if(!built) return;
+    try{
+      clusterGroup.addLayers(built.markers);
+      markersByRoute[route.id] = built.markers;
+      built.group.addTo(map);
+      layerByRoute[route.id] = built.group;
+    }catch(err){
+      App.utils.reportError(`Не вдалося показати маршрут «${route.name}» на карті`, err);
+      try{ if(oldMarkers){ clusterGroup.addLayers(oldMarkers); markersByRoute[route.id] = oldMarkers; } }catch(e){ /* nothing more to do */ }
+    }
+    if(App.photoCards) App.photoCards.schedule(); // fix leader lines once the new icons are laid out
   }
 
   // Removes a route's layers from the map without touching its data —
@@ -328,6 +359,17 @@ App.map = {}; // filled in at the bottom of this IIFE
       App.photoCards.toggle(routeId, pointId);
       map.closePopup();
     }));
+  });
+
+  // Right-click on an empty spot of the map: "Очистити карту". (Lines, markers and photo cards
+  // handle their own right-clicks and never reach this.)
+  map.on('contextmenu', e => {
+    const ev = e.originalEvent || {};
+    if(ev.preventDefault) ev.preventDefault();
+    const s = App.sidebar.dataSummary();
+    App.contextMenu.open(ev.clientX || 0, ev.clientY || 0, [
+      { icon: '🗑', label: s.empty ? 'Очистити карту (вона порожня)' : 'Очистити карту…', danger: true, disabled: s.empty, action: () => App.sidebar.clearAll() }
+    ], { title: 'Карта' });
   });
 
   // Map clicks only do something while an "add point" mode is active (started

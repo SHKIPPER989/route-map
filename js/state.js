@@ -10,7 +10,9 @@
 // ---- data model -------------------------------------------------------------
 // route:  {id, name, type:'pedestrian'|'vehicle', color, tags:[...], visible,
 //          points:[{id,lat,lng,date,time,sourceType,note,photo,photoCard}],
-//          bends:[{id,lat,lng,afterPointId}]}
+//          bends:[{id,lat,lng,afterPointId}],
+//          dashed?}                  // dashed = drawn as a dashed line (set for a "Дорога назад" route, which
+//                                    // follows the same path as another route and would otherwise hide it)
 //   "bends" = коліна (curve waypoints). Each bend hangs off the fixation point
 //   it follows (afterPointId); bends of the same point are drawn in ARRAY
 //   order, so the order of route.bends is meaningful — never re-sort it.
@@ -31,7 +33,16 @@ App.state = {
 };
 
 App.utils = {
-  uid(prefix){ return prefix + Date.now() + '-' + Math.floor(Math.random() * 10000); },
+  // Shows an error on the page (a red note at the bottom-left, defined in index.html) as well as in
+  // the console, so a problem is visible to the user instead of silently breaking something.
+  reportError(message, err){
+    console.error(message, err);
+    if(window.__showError) window.__showError(message + (err && err.message ? ': ' + err.message : ''));
+  },
+
+  // Unique within a session even when many ids are made in the same millisecond (the running
+  // counter), and practically unique across sessions (time + random part).
+  uid(prefix){ return prefix + Date.now() + '-' + (App.utils._uidSeq = (App.utils._uidSeq || 0) + 1) + '-' + Math.floor(Math.random() * 10000); },
 
   escapeHtml(s){
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
@@ -96,6 +107,26 @@ App.utils = {
            .forEach(b => nodes.push({ kind: 'bend', id: b.id, lat: b.lat, lng: b.lng, anchorId: p.id }));
     });
     return nodes;
+  },
+
+  // The bends of a route once its direction is flipped. `sortedPts` is the route's points in
+  // their CURRENT (time) order. A stretch of bends that sat between points Pi and Pi+1 now lies
+  // between Pi+1 and Pi, so it is re-attached to Pi+1 and its order is reversed. Bends hanging
+  // off the last point lead nowhere after the flip and are left out. Returns copies whose
+  // afterPointId is the id (in `sortedPts`) of the point they now follow — callers that build
+  // new points map those ids themselves. Shared by "Реверс напрямку" and "Дорога назад".
+  reverseBends(sortedPts, bends){
+    const slot = new Map(sortedPts.map((p, i) => [p.id, i]));
+    const groups = new Map();                                    // old anchor index -> its bends, in old order
+    (bends || []).forEach(b => {
+      const i = slot.get(b.afterPointId);
+      if(i === undefined || i >= sortedPts.length - 1) return;
+      if(!groups.has(i)) groups.set(i, []);
+      groups.get(i).push(b);
+    });
+    const out = [];
+    groups.forEach((list, i) => list.slice().reverse().forEach(b => out.push(Object.assign({}, b, { afterPointId: sortedPts[i + 1].id }))));
+    return out;
   },
 
   buildPathLatLngs(route){
